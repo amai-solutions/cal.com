@@ -28,4 +28,4 @@ RUN npx turbo run build
 EXPOSE 3000
 
 # Migraciones y arranque de la app web (el resto ya compiló)
-CMD sh -c "yarn workspace @calcom/prisma db-deploy && yarn workspace @calcom/web start"
+CMD ["sh","-lc","yarn workspace @calcom/prisma db-deploy && yarn workspace @calcom/web start"]
