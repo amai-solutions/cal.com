@@ -23,7 +23,7 @@ RUN sed -i '1s/^/"use client";\n/' packages/ui/components/avatar/UserAvatarGroup
 
 # Instala deps y compila TODO (sin filtros)
 RUN yarn install --immutable
-RUN npx turbo run build
+RUN npx turbo run build --filter=@calcom/web
 
 EXPOSE 3000
 
