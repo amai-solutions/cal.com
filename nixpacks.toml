@@ -1,0 +1,5 @@
+# Archivo de configuración para Nixpacks
+
+[phases.build]
+# Usamos el filtro para construir únicamente la aplicación web principal
+cmds = ["npx turbo run build --filter=@calcom/web"]
