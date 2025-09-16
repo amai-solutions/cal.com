@@ -1,4 +1,7 @@
+[variables]
+# Esta variable se queda aquí para evitar el error de JSON en la construcción.
+ALLOWED_HOSTNAMES = '"cal.com","cal.dev","cal-staging.com","cal.community","cal.amai.solutions","amai.solutions"'
 
 [phases.build]
-# Solución #1: Usamos "npx turbo run build" para construir solo la app web y sus dependencias, evitando los paquetes con errores.
+# Este es el comando para construir solo la aplicación principal.
 cmds = ["npx turbo run build --filter=@calcom/web"]
