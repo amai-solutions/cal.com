@@ -1,8 +1,3 @@
-# Archivo de configuración para Nixpacks (Versión Correcta y Unificada)
-
-[variables]
-# Solución #2: Forzamos el valor de ALLOWED_HOSTNAMES con las comillas correctas para evitar el error de JSON.
-ALLOWED_HOSTNAMES = '"cal.amai.solutions"'
 
 [phases.build]
 # Solución #1: Usamos "npx turbo run build" para construir solo la app web y sus dependencias, evitando los paquetes con errores.
