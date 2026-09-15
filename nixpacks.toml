@@ -1,4 +1,5 @@
 [variables]
+NIXPACKS_NODE_VERSION = "22"
 # Esta variable se queda aquí para evitar el error de JSON en la construcción.
 ALLOWED_HOSTNAMES = '"cal.com","cal.dev","cal-staging.com","cal.community","cal.amai.solutions","amai.solutions"'
 
