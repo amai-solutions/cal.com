@@ -1,6 +1,4 @@
-import path from "node:path";
-import dotenv from "dotenv";
-dotenv.config({ path: path.join(__dirname, "..", "..", ".env") });
+// dotenv removed for container build: env vars are provided by the platform, not a .env file (fixes ESM bundling of dotenv CJS internals)
 process.env.EMBED_PUBLIC_VERCEL_URL = process.env.VERCEL_URL;
 process.env.EMBED_PUBLIC_WEBAPP_URL = process.env.NEXT_PUBLIC_WEBAPP_URL;
 // eslint-disable-next-line turbo/no-undeclared-env-vars
