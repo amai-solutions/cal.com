@@ -1,5 +1,6 @@
-const path = require("node:path");
-require("dotenv").config({ path: path.join(__dirname, "..", "..", ".env") });
+import path from "node:path";
+import dotenv from "dotenv";
+dotenv.config({ path: path.join(__dirname, "..", "..", ".env") });
 process.env.EMBED_PUBLIC_VERCEL_URL = process.env.VERCEL_URL;
 process.env.EMBED_PUBLIC_WEBAPP_URL = process.env.NEXT_PUBLIC_WEBAPP_URL;
 // eslint-disable-next-line turbo/no-undeclared-env-vars
