@@ -18,19 +18,24 @@ describe("Payload Builder Registry", () => {
       const factory = createPayloadBuilderFactory();
 
       // Test each builder category by trigger event
-      const bookingBuilder = factory.getBuilder(DEFAULT_WEBHOOK_VERSION, WebhookTriggerEvents.BOOKING_CREATED);
-      const formBuilder = factory.getBuilder(DEFAULT_WEBHOOK_VERSION, WebhookTriggerEvents.FORM_SUBMITTED);
+      const bookingBuilder = factory.getBuilder(
+        DEFAULT_WEBHOOK_VERSION,
+        WebhookTriggerEvents.BOOKING_CREATED
+      );
       const oooBuilder = factory.getBuilder(DEFAULT_WEBHOOK_VERSION, WebhookTriggerEvents.OOO_CREATED);
-      const recordingBuilder = factory.getBuilder(DEFAULT_WEBHOOK_VERSION, WebhookTriggerEvents.RECORDING_READY);
-      const meetingBuilder = factory.getBuilder(DEFAULT_WEBHOOK_VERSION, WebhookTriggerEvents.MEETING_STARTED);
-      const instantBuilder = factory.getBuilder(DEFAULT_WEBHOOK_VERSION, WebhookTriggerEvents.INSTANT_MEETING);
+      const recordingBuilder = factory.getBuilder(
+        DEFAULT_WEBHOOK_VERSION,
+        WebhookTriggerEvents.RECORDING_READY
+      );
+      const meetingBuilder = factory.getBuilder(
+        DEFAULT_WEBHOOK_VERSION,
+        WebhookTriggerEvents.MEETING_STARTED
+      );
 
       expect(bookingBuilder).toBeDefined();
-      expect(formBuilder).toBeDefined();
       expect(oooBuilder).toBeDefined();
       expect(recordingBuilder).toBeDefined();
       expect(meetingBuilder).toBeDefined();
-      expect(instantBuilder).toBeDefined();
     });
 
     it("should register v2021-10-20 builders", () => {
@@ -52,7 +57,10 @@ describe("Payload Builder Registry", () => {
       const factory = createPayloadBuilderFactory();
 
       // Request non-existent version (cast to WebhookVersion for testing fallback)
-      const builder = factory.getBuilder("9999-99-99" as WebhookVersion, WebhookTriggerEvents.BOOKING_CREATED);
+      const builder = factory.getBuilder(
+        "9999-99-99" as WebhookVersion,
+        WebhookTriggerEvents.BOOKING_CREATED
+      );
 
       // Should get default builder, not throw
       expect(builder).toBeDefined();
@@ -76,12 +84,9 @@ describe("Payload Builder Registry", () => {
       // Register new version
       const newVersionBuilders = {
         booking: new V2021_10_20.BookingPayloadBuilder(),
-        form: new V2021_10_20.FormPayloadBuilder(),
         ooo: new V2021_10_20.OOOPayloadBuilder(),
         recording: new V2021_10_20.RecordingPayloadBuilder(),
         meeting: new V2021_10_20.MeetingPayloadBuilder(),
-        instantMeeting: new V2021_10_20.InstantMeetingBuilder(),
-        delegation: new V2021_10_20.DelegationPayloadBuilder(),
       };
 
       factory.registerVersion(NEW_VERSION, newVersionBuilders);
@@ -97,12 +102,9 @@ describe("Payload Builder Registry", () => {
       // Register second version with new instances
       const v2Builders = {
         booking: new V2021_10_20.BookingPayloadBuilder(),
-        form: new V2021_10_20.FormPayloadBuilder(),
         ooo: new V2021_10_20.OOOPayloadBuilder(),
         recording: new V2021_10_20.RecordingPayloadBuilder(),
         meeting: new V2021_10_20.MeetingPayloadBuilder(),
-        instantMeeting: new V2021_10_20.InstantMeetingBuilder(),
-        delegation: new V2021_10_20.DelegationPayloadBuilder(),
       };
 
       factory.registerVersion(NEW_VERSION, v2Builders);
@@ -128,11 +130,9 @@ describe("Payload Builder Registry", () => {
       // And not interfere with each other
       factory1.registerVersion("test-1", {
         booking: new V2021_10_20.BookingPayloadBuilder(),
-        form: new V2021_10_20.FormPayloadBuilder(),
         ooo: new V2021_10_20.OOOPayloadBuilder(),
         recording: new V2021_10_20.RecordingPayloadBuilder(),
         meeting: new V2021_10_20.MeetingPayloadBuilder(),
-        instantMeeting: new V2021_10_20.InstantMeetingBuilder(),
       });
 
       expect(factory1.getRegisteredVersions()).not.toEqual(factory2.getRegisteredVersions());
@@ -144,4 +144,3 @@ describe("Payload Builder Registry", () => {
     });
   });
 });
-

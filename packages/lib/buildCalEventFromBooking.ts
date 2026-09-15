@@ -2,7 +2,7 @@ import dayjs from "@calcom/dayjs";
 import type { Prisma } from "@calcom/prisma/client";
 
 import { parseRecurringEvent } from "./isRecurringEvent";
-import { getTranslation } from "./server/i18n";
+import { getTranslation } from "@calcom/i18n/server";
 
 type DestinationCalendar = {
   id: number;
@@ -13,9 +13,9 @@ type DestinationCalendar = {
   eventTypeId: number | null;
   credentialId: number | null;
   delegationCredentialId: string | null;
-  domainWideDelegationCredentialId: string | null;
   createdAt: Date | null;
   updatedAt: Date | null;
+  customCalendarReminder: number | null;
 } | null;
 
 type Attendee = {
@@ -108,8 +108,8 @@ export const buildCalEventFromBooking = async ({
     destinationCalendar: booking.destinationCalendar
       ? [booking.destinationCalendar]
       : booking.user?.destinationCalendar
-      ? [booking.user?.destinationCalendar]
-      : [],
+        ? [booking.user?.destinationCalendar]
+        : [],
     seatsPerTimeSlot: booking.eventType?.seatsPerTimeSlot,
     seatsShowAttendees: booking.eventType?.seatsShowAttendees,
     customReplyToEmail: booking.eventType?.customReplyToEmail,

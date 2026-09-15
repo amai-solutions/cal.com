@@ -1,23 +1,19 @@
+import process from "node:process";
+import type { AppFlags, FeatureId } from "@calcom/features/flags/config";
+import { FeaturesRepository } from "@calcom/features/flags/features.repository";
+import { ProfileRepository } from "@calcom/features/profile/repositories/ProfileRepository";
+import { DEFAULT_SCHEDULE, getAvailabilityFromSchedule } from "@calcom/lib/availability";
+import { WEBAPP_URL } from "@calcom/lib/constants";
+import { prisma } from "@calcom/prisma";
+import type { EventType, Prisma, Team, User } from "@calcom/prisma/client";
+import { MembershipRole, SchedulingType } from "@calcom/prisma/enums";
+import { teamMetadataSchema } from "@calcom/prisma/zod-utils";
+import type { Schedule } from "@calcom/types/schedule";
 import type { Browser, Page, WorkerInfo } from "@playwright/test";
 import { expect } from "@playwright/test";
 import { hashSync as hash } from "bcryptjs";
 import { uuid } from "short-uuid";
 import { v4 } from "uuid";
-
-import updateChildrenEventTypes from "@calcom/features/ee/managed-event-types/lib/handleChildrenEventTypes";
-import stripe from "@calcom/features/ee/payments/server/stripe";
-import type { AppFlags } from "@calcom/features/flags/config";
-import { ProfileRepository } from "@calcom/features/profile/repositories/ProfileRepository";
-import { DEFAULT_SCHEDULE, getAvailabilityFromSchedule } from "@calcom/lib/availability";
-import { WEBAPP_URL } from "@calcom/lib/constants";
-import { prisma } from "@calcom/prisma";
-import type { Team } from "@calcom/prisma/client";
-import type { Prisma, User, EventType } from "@calcom/prisma/client";
-import { MembershipRole, SchedulingType, TimeUnit, WorkflowTriggerEvents } from "@calcom/prisma/enums";
-import { teamMetadataSchema } from "@calcom/prisma/zod-utils";
-import type { Schedule } from "@calcom/types/schedule";
-
-import { createRoutingForm } from "../lib/test-helpers/routingFormHelpers";
 import { selectFirstAvailableTimeSlotNextMonth, teamEventSlug, teamEventTitle } from "../lib/testUtils";
 import type { createEmailsFixture } from "./emails";
 import { TimeZoneEnum } from "./types";
@@ -46,9 +42,7 @@ export type CreateUsersFixture = ReturnType<typeof createUsersFixture>;
 
 const userIncludes = {
   eventTypes: true,
-  workflows: true,
   credentials: true,
-  routingForms: true,
 } satisfies Prisma.UserInclude;
 
 type InstallStripeParamsSkipTrue = {
@@ -80,19 +74,6 @@ const _userWithEventTypes = {
 } satisfies Prisma.UserDefaultArgs;
 
 type UserWithIncludes = Prisma.UserGetPayload<typeof _userWithEventTypes>;
-
-const createTeamWorkflow = async (user: { id: number }, team: { id: number }) => {
-  return await prisma.workflow.create({
-    data: {
-      name: "Team Workflow",
-      trigger: WorkflowTriggerEvents.BEFORE_EVENT,
-      time: 24,
-      timeUnit: TimeUnit.HOUR,
-      userId: user.id,
-      teamId: team.id,
-    },
-  });
-};
 
 export const createTeamEventType = async (
   user: { id: number },
@@ -127,7 +108,7 @@ export const createTeamEventType = async (
       hosts: {
         create: {
           userId: user.id,
-          isFixed: scenario?.schedulingType === SchedulingType.COLLECTIVE ? true : false,
+          isFixed: scenario?.schedulingType === SchedulingType.COLLECTIVE,
         },
       },
       schedulingType: scenario?.schedulingType ?? SchedulingType.COLLECTIVE,
@@ -217,7 +198,6 @@ const createTeamAndAddUser = async (
       schedulingType: schedulingType,
       assignAllTeamMembers: assignAllTeamMembersForSubTeamEvents,
     });
-    await createTeamWorkflow(user, subteam);
     data.children = { connect: [{ id: subteam.id }] };
   }
   data.orgProfiles = isOrg
@@ -253,15 +233,17 @@ const createTeamAndAddUser = async (
 
   // Enable feature flags for the team if specified
   if (teamFeatureFlags && teamFeatureFlags.length > 0) {
-    await prisma.teamFeatures.createMany({
-      data: teamFeatureFlags.map((featureFlag) => ({
-        teamId: team.id,
-        featureId: featureFlag,
-        assignedBy: "e2e-fixture",
-        assignedAt: new Date(),
-        enabled: true,
-      })),
-    });
+    const featuresRepository = new FeaturesRepository(prisma);
+    await Promise.all(
+      teamFeatureFlags.map((featureFlag) =>
+        featuresRepository.setTeamFeatureState({
+          teamId: team.id,
+          featureId: featureFlag as FeatureId,
+          state: "enabled",
+          assignedBy: "e2e-fixture",
+        })
+      )
+    );
   }
 
   return team;
@@ -319,8 +301,6 @@ export const createUsersFixture = (
           })
         | null,
       scenario: {
-        seedRoutingForms?: boolean;
-        seedRoutingFormWithAttributeRouting?: boolean;
         hasTeam?: true;
         numberOfTeams?: number;
         teamRole?: MembershipRole;
@@ -402,18 +382,6 @@ export const createUsersFixture = (
         });
       }
 
-      const workflows: SupportedTestWorkflows[] = [
-        { name: "Default Workflow", trigger: "NEW_EVENT" },
-        { name: "Test Workflow", trigger: "EVENT_CANCELLED" },
-        ...(opts?.workflows || []),
-      ];
-      for (const workflowData of workflows) {
-        workflowData.user = { connect: { id: _user.id } };
-        await prisma.workflow.create({
-          data: workflowData,
-        });
-      }
-
       const user = await prisma.user.findUniqueOrThrow({
         where: { id: _user.id },
         include: userIncludes,
@@ -423,15 +391,17 @@ export const createUsersFixture = (
       // Default to DEFAULT_USER_FEATURE_FLAGS if not specified
       const userFeatureFlags = opts?.userFeatureFlags ?? DEFAULT_USER_FEATURE_FLAGS;
       if (userFeatureFlags.length > 0) {
-        await prisma.userFeatures.createMany({
-          data: userFeatureFlags.map((featureFlag) => ({
-            userId: user.id,
-            featureId: featureFlag,
-            assignedBy: "e2e-fixture",
-            assignedAt: new Date(),
-            enabled: true,
-          })),
-        });
+        const featuresRepository = new FeaturesRepository(prisma);
+        await Promise.all(
+          userFeatureFlags.map((featureFlag) =>
+            featuresRepository.setUserFeatureState({
+              userId: user.id,
+              featureId: featureFlag as FeatureId,
+              state: "enabled",
+              assignedBy: "e2e-fixture",
+            })
+          )
+        );
       }
 
       if (scenario.hasTeam) {
@@ -489,7 +459,7 @@ export const createUsersFixture = (
                 data: {
                   userId: teamUser.id,
                   eventTypeId: teamEvent.id,
-                  isFixed: scenario.schedulingType === SchedulingType.COLLECTIVE ? true : false,
+                  isFixed: scenario.schedulingType === SchedulingType.COLLECTIVE,
                 },
               });
 
@@ -502,29 +472,6 @@ export const createUsersFixture = (
               );
               teamMates.push(teamUser);
               store.users.push(teammateFixture);
-            }
-            // If the teamEvent is a managed one, we add the team mates to it.
-            if (scenario.schedulingType === SchedulingType.MANAGED && scenario.addManagedEventToTeamMates) {
-              await updateChildrenEventTypes({
-                eventTypeId: teamEvent.id,
-                currentUserId: user.id,
-                oldEventType: {
-                  team: null,
-                },
-                updatedEventType: teamEvent,
-                children: teamMates.map((tm) => ({
-                  hidden: false,
-                  owner: {
-                    id: tm.id,
-                    name: tm.name || tm.username || "Nameless",
-                    email: tm.email,
-                    eventTypeSlugs: [],
-                  },
-                })),
-                profileId: null,
-                prisma,
-                updatedValues: {},
-              });
             }
             // Add Teammates to OrgUsers
             if (scenario.isOrg) {
@@ -572,88 +519,6 @@ export const createUsersFixture = (
             }
           }
         }
-      }
-
-      if (scenario.seedRoutingForms) {
-        const firstTeamMembership = await prisma.membership.findFirstOrThrow({
-          where: {
-            userId: _user.id,
-            team: {
-              isOrganization: false,
-            },
-          },
-        });
-        if (!firstTeamMembership) {
-          throw new Error("No sub-team created");
-        }
-        await createRoutingForm({
-          userId: _user.id,
-          teamId: firstTeamMembership.teamId,
-          formType: scenario.seedRoutingFormWithAttributeRouting ? "attributeRouting" : "default",
-          ...(scenario.seedRoutingFormWithAttributeRouting && {
-            attributeRouting: {
-              attributes: [
-                {
-                  name: "Department",
-                  type: "SINGLE_SELECT" as const,
-                  options: ["Engineering", "Sales", "Marketing", "Product", "Design"],
-                },
-                {
-                  name: "Location",
-                  type: "SINGLE_SELECT" as const,
-                  options: ["New York", "London", "Tokyo", "Berlin", "Remote"],
-                },
-                {
-                  name: "Skills",
-                  type: "MULTI_SELECT" as const,
-                  options: ["JavaScript", "React", "Node.js", "Python", "Design", "Sales"],
-                },
-                {
-                  name: "Years of Experience",
-                  type: "NUMBER" as const,
-                },
-                {
-                  name: "Bio",
-                  type: "TEXT" as const,
-                },
-              ],
-              assignments: [
-                {
-                  memberIndex: 0,
-                  attributeValues: {
-                    Location: ["New York"],
-                    Skills: ["JavaScript"],
-                  },
-                },
-                {
-                  memberIndex: 1,
-                  attributeValues: {
-                    Location: ["London"],
-                    Skills: ["React", "JavaScript"],
-                  },
-                },
-              ],
-              teamEvents: [
-                {
-                  title: "Team Sales",
-                  slug: "team-sales",
-                  schedulingType: "ROUND_ROBIN",
-                  assignAllTeamMembers: true,
-                  length: 60,
-                  description: "Team Sales",
-                },
-                {
-                  title: "Team Javascript",
-                  slug: "team-javascript",
-                  schedulingType: "ROUND_ROBIN",
-                  assignAllTeamMembers: true,
-                  length: 60,
-                  description: "Team Javascript",
-                },
-              ],
-            },
-          }),
-        });
       }
 
       const finalUser = await prisma.user.findUniqueOrThrow({
@@ -765,26 +630,25 @@ const createUserFixture = (user: UserWithIncludes, page: Page) => {
     username: user.username,
     email: user.email,
     eventTypes: user.eventTypes,
-    routingForms: user.routingForms,
     self,
     apiLogin: async (navigateToUrl?: string, password?: string) =>
-      apiLogin({ ...(await self()), password: password || user.username }, store.page, navigateToUrl),
+      apiLogin({ ...(await self()), password: password ?? `${user.username!.charAt(0).toUpperCase()}${user.username!.slice(1)}1` }, store.page, navigateToUrl),
     /** Don't forget to close context at the end */
     apiLoginOnNewBrowser: async (browser: Browser, password?: string) => {
       const newContext = await browser.newContext();
       const newPage = await newContext.newPage();
-      await apiLogin({ ...(await self()), password: password || user.username }, newPage);
+      await apiLogin({ ...(await self()), password: password ?? `${user.username!.charAt(0).toUpperCase()}${user.username!.slice(1)}1` }, newPage);
       // Don't forget to: newContext.close();
       return [newContext, newPage] as const;
     },
     /**
      * @deprecated use apiLogin instead
      */
-    login: async () => login({ ...(await self()), password: user.username }, store.page),
-    loginOnNewBrowser: async (browser: Browser) => {
+    login: async (password?: string) => login({ ...(await self()), password: password ?? `${user.username!.charAt(0).toUpperCase()}${user.username!.slice(1)}1` }, store.page),
+    loginOnNewBrowser: async (browser: Browser, password?: string) => {
       const newContext = await browser.newContext();
       const newPage = await newContext.newPage();
-      await login({ ...(await self()), password: user.username }, newPage);
+      await login({ ...(await self()), password: password ?? `${user.username!.charAt(0).toUpperCase()}${user.username!.slice(1)}1` }, newPage);
       // Don't forget to: newContext.close();
       return [newContext, newPage] as const;
     },
@@ -923,8 +787,6 @@ type SupportedTestEventTypes = Prisma.EventTypeCreateInput & {
   _bookings?: Prisma.BookingCreateInput[];
 };
 
-type SupportedTestWorkflows = Prisma.WorkflowCreateInput;
-
 type CustomUserOptsKeys =
   | "username"
   | "completedOnboarding"
@@ -933,13 +795,11 @@ type CustomUserOptsKeys =
   | "email"
   | "organizationId"
   | "twoFactorEnabled"
-  | "disableImpersonation"
   | "role"
   | "identityProvider";
 type CustomUserOpts = Partial<Pick<User, CustomUserOptsKeys>> & {
   timeZone?: TimeZoneEnum;
   eventTypes?: SupportedTestEventTypes[];
-  workflows?: SupportedTestWorkflows[];
   // ignores adding the worker-index after username
   useExactUsername?: boolean;
   roleInOrganization?: MembershipRole;
@@ -966,13 +826,15 @@ const createUser = (
       : `${opts?.username || "user"}${suffixToMakeUsernameUnique}`;
 
   const emailDomain = opts?.emailDomain || "example.com";
+  const defaultPassword = opts?.password ?? `${uname.charAt(0).toUpperCase()}${uname.slice(1)}1`;
+
   return {
     username: uname,
     name: opts?.name,
     email: opts?.email ?? `${uname}@${emailDomain}`,
     password: {
       create: {
-        hash: hashPassword(uname),
+        hash: hashPassword(defaultPassword),
       },
     },
     emailVerified: new Date(),
@@ -981,14 +843,13 @@ const createUser = (
     locale: opts?.locale ?? "en",
     role: opts?.role ?? "USER",
     twoFactorEnabled: opts?.twoFactorEnabled ?? false,
-    disableImpersonation: opts?.disableImpersonation ?? false,
     ...getOrganizationRelatedProps({
       organizationId: opts?.organizationId,
       role: opts?.roleInOrganization,
       profileUsername: opts?.profileUsername,
     }),
     schedules:
-      opts?.completedOnboarding ?? true
+      (opts?.completedOnboarding ?? true)
         ? {
             create: {
               name: "Working Hours",
@@ -1051,7 +912,7 @@ const createUser = (
 };
 
 async function confirmPendingPayment(page: Page) {
-  await page.waitForURL(new RegExp("/booking/*"));
+  await page.waitForURL(/\/booking\/*/);
 
   const url = page.url();
 
@@ -1106,17 +967,45 @@ export async function login(
   await responsePromise;
 }
 
+/**
+ * Helper to retry network requests that may fail with transient errors like ECONNRESET
+ */
+async function retryOnNetworkError<T>(fn: () => Promise<T>, maxRetries = 3, delayMs = 500): Promise<T> {
+  let lastError: Error | undefined;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error as Error;
+      const errorMessage = lastError.message || "";
+      // Only retry on transient network errors
+      const isRetryable =
+        errorMessage.includes("ECONNRESET") ||
+        errorMessage.includes("ECONNREFUSED") ||
+        errorMessage.includes("ETIMEDOUT") ||
+        errorMessage.includes("socket hang up");
+
+      if (!isRetryable || attempt === maxRetries) {
+        throw lastError;
+      }
+      // Wait before retrying with exponential backoff
+      await new Promise((resolve) => setTimeout(resolve, delayMs * attempt));
+    }
+  }
+  throw lastError;
+}
+
 export async function apiLogin(
   user: Pick<User, "username"> & Partial<Pick<User, "email">> & { password: string | null },
   page: Page,
   navigateToUrl?: string
 ) {
-  // Get CSRF token
-  const csrfToken = await page
-    .context()
-    .request.get("/api/auth/csrf")
-    .then((response) => response.json())
-    .then((json) => json.csrfToken);
+  // Get CSRF token with retry for transient network errors
+  const csrfToken = await retryOnNetworkError(async () => {
+    const response = await page.context().request.get("/api/auth/csrf");
+    const json = await response.json();
+    return json.csrfToken;
+  });
 
   // Make the login request
   const loginData = {
@@ -1128,9 +1017,11 @@ export async function apiLogin(
     csrfToken,
   };
 
-  const response = await page.context().request.post("/api/auth/callback/credentials", {
-    data: loginData,
-  });
+  const response = await retryOnNetworkError(() =>
+    page.context().request.post("/api/auth/callback/credentials", {
+      data: loginData,
+    })
+  );
 
   expect(response.status()).toBe(200);
 
@@ -1138,10 +1029,8 @@ export async function apiLogin(
    * Critical: Navigate to a protected page to trigger NextAuth session loading
    * This forces NextAuth to run the jwt and session callbacks that populate
    * the session with profile, org, and other important data
-   * We picked /settings/my-account/profile due to it being one of
-   * our lighest protected pages and doesnt do anything other than load the user profile
    */
-  await page.goto(navigateToUrl || "/settings/my-account/profile");
+  await page.goto(navigateToUrl || "/e2e/session-warmup");
 
   // Wait for the session API call to complete to ensure session is fully established
   // Only wait if we're on a protected page that would trigger the session API call

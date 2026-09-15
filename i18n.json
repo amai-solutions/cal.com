@@ -20,6 +20,7 @@
       "fr",
       "he",
       "hu",
+      "id",
       "it",
       "ja",
       "km",
@@ -43,7 +44,7 @@
   },
   "buckets": {
     "json": {
-      "include": ["apps/web/public/static/locales/[locale]/common.json"]
+      "include": ["packages/i18n/locales/[locale]/common.json"]
     }
   },
   "$schema": "https://lingo.dev/schema/i18n.json"

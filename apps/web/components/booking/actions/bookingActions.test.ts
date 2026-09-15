@@ -84,9 +84,8 @@ function createMockContext(overrides: Partial<BookingActionContext> = {}): Booki
       location: "integrations:daily",
       payment: [],
       seatsReferences: [],
-      assignmentReason: [],
+      assignmentReasonSortedByCreatedAt: [],
       metadata: null,
-      routedFromRoutingFormReponse: null,
       listingStatus: "upcoming",
       recurringInfo: undefined,
       loggedInUser: {
@@ -108,7 +107,6 @@ function createMockContext(overrides: Partial<BookingActionContext> = {}): Booki
     isRecurring: false,
     isTabRecurring: false,
     isTabUnconfirmed: false,
-    isBookingFromRoutingForm: false,
     isDisabledCancelling: false,
     isDisabledRescheduling: false,
     isCalVideoLocation: true,
@@ -269,14 +267,6 @@ describe("Booking Actions", () => {
       expect(actionIds).toContain("add_members");
     });
 
-    it("should include reroute action for routing form bookings", () => {
-      const context = createMockContext({ isBookingFromRoutingForm: true });
-      const actions = getEditEventActions(context);
-
-      const rerouteAction = actions.find((a) => a.id === "reroute");
-      expect(rerouteAction).toBeDefined();
-    });
-
     it("should include reassign action for round robin events with no host groups", () => {
       const context = createMockContext({
         booking: {
@@ -373,6 +363,73 @@ describe("Booking Actions", () => {
 
       expect(rescheduleAction?.disabled).toBe(true);
       expect(rescheduleRequestAction?.disabled).toBe(true);
+    });
+
+    it("should disable change_location for past bookings", () => {
+      const context = createMockContext({ isBookingInPast: true });
+      const actions = getEditEventActions(context);
+
+      const changeLocationAction = actions.find((a) => a.id === "change_location");
+      expect(changeLocationAction?.disabled).toBe(true);
+    });
+
+    it("should disable change_location for cancelled bookings", () => {
+      const context = createMockContext({ isCancelled: true });
+      const actions = getEditEventActions(context);
+
+      const changeLocationAction = actions.find((a) => a.id === "change_location");
+      expect(changeLocationAction?.disabled).toBe(true);
+    });
+
+    it("should disable add_members for rejected bookings", () => {
+      const context = createMockContext({ isRejected: true });
+      const actions = getEditEventActions(context);
+
+      const addMembersAction = actions.find((a) => a.id === "add_members");
+      expect(addMembersAction?.disabled).toBe(true);
+    });
+
+    it("should disable reassign for cancelled round robin bookings", () => {
+      const context = createMockContext({
+        isCancelled: true,
+        booking: {
+          ...createMockContext().booking,
+          eventType: {
+            ...createMockContext().booking.eventType,
+            schedulingType: SchedulingType.ROUND_ROBIN,
+            hostGroups: [],
+          },
+        },
+      });
+      const actions = getEditEventActions(context);
+
+      const reassignAction = actions.find((a) => a.id === "reassign");
+      expect(reassignAction?.disabled).toBe(true);
+    });
+
+    it("should enable edit actions for upcoming active bookings", () => {
+      const context = createMockContext({
+        isBookingInPast: false,
+        isCancelled: false,
+        isRejected: false,
+        booking: {
+          ...createMockContext().booking,
+          eventType: {
+            ...createMockContext().booking.eventType,
+            schedulingType: SchedulingType.ROUND_ROBIN,
+            hostGroups: [],
+          },
+        },
+      });
+      const actions = getEditEventActions(context);
+
+      const changeLocationAction = actions.find((a) => a.id === "change_location");
+      const addMembersAction = actions.find((a) => a.id === "add_members");
+      const reassignAction = actions.find((a) => a.id === "reassign");
+
+      expect(changeLocationAction?.disabled).toBe(false);
+      expect(addMembersAction?.disabled).toBe(false);
+      expect(reassignAction?.disabled).toBe(false);
     });
   });
 
@@ -522,6 +579,108 @@ describe("Booking Actions", () => {
       const context = createMockContext({ cardCharged: true });
 
       expect(isActionDisabled("charge_card", context)).toBe(true);
+    });
+
+    describe("change_location action", () => {
+      it("should be disabled for past bookings", () => {
+        const context = createMockContext({ isBookingInPast: true });
+        expect(isActionDisabled("change_location", context)).toBe(true);
+      });
+
+      it("should be disabled for cancelled bookings", () => {
+        const context = createMockContext({ isCancelled: true });
+        expect(isActionDisabled("change_location", context)).toBe(true);
+      });
+
+      it("should be disabled for rejected bookings", () => {
+        const context = createMockContext({ isRejected: true });
+        expect(isActionDisabled("change_location", context)).toBe(true);
+      });
+
+      it("should be enabled for upcoming active bookings", () => {
+        const context = createMockContext({
+          isBookingInPast: false,
+          isCancelled: false,
+          isRejected: false,
+        });
+        expect(isActionDisabled("change_location", context)).toBe(false);
+      });
+    });
+
+    describe("add_members action", () => {
+      it("should be disabled for past bookings", () => {
+        const context = createMockContext({ isBookingInPast: true });
+        expect(isActionDisabled("add_members", context)).toBe(true);
+      });
+
+      it("should be disabled for cancelled bookings", () => {
+        const context = createMockContext({ isCancelled: true });
+        expect(isActionDisabled("add_members", context)).toBe(true);
+      });
+
+      it("should be disabled for rejected bookings", () => {
+        const context = createMockContext({ isRejected: true });
+        expect(isActionDisabled("add_members", context)).toBe(true);
+      });
+
+      it("should be enabled for upcoming active bookings", () => {
+        const context = createMockContext({
+          isBookingInPast: false,
+          isCancelled: false,
+          isRejected: false,
+        });
+        expect(isActionDisabled("add_members", context)).toBe(false);
+      });
+    });
+
+    describe("reassign action", () => {
+      it("should be disabled for past bookings", () => {
+        const context = createMockContext({ isBookingInPast: true });
+        expect(isActionDisabled("reassign", context)).toBe(true);
+      });
+
+      it("should be disabled for cancelled bookings", () => {
+        const context = createMockContext({ isCancelled: true });
+        expect(isActionDisabled("reassign", context)).toBe(true);
+      });
+
+      it("should be disabled for rejected bookings", () => {
+        const context = createMockContext({ isRejected: true });
+        expect(isActionDisabled("reassign", context)).toBe(true);
+      });
+
+      it("should be enabled for upcoming active bookings", () => {
+        const context = createMockContext({
+          isBookingInPast: false,
+          isCancelled: false,
+          isRejected: false,
+        });
+        expect(isActionDisabled("reassign", context)).toBe(false);
+      });
+    });
+
+    describe("cancel action with cancelled/rejected states", () => {
+      it("should be disabled for already cancelled bookings", () => {
+        const context = createMockContext({ isCancelled: true });
+        expect(isActionDisabled("cancel", context)).toBe(true);
+      });
+
+      it("should be disabled for rejected bookings", () => {
+        const context = createMockContext({ isRejected: true });
+        expect(isActionDisabled("cancel", context)).toBe(true);
+      });
+    });
+
+    describe("reschedule_request action with cancelled/rejected states", () => {
+      it("should be disabled for cancelled bookings", () => {
+        const context = createMockContext({ isCancelled: true });
+        expect(isActionDisabled("reschedule_request", context)).toBe(true);
+      });
+
+      it("should be disabled for rejected bookings", () => {
+        const context = createMockContext({ isRejected: true });
+        expect(isActionDisabled("reschedule_request", context)).toBe(true);
+      });
     });
   });
 

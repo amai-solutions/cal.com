@@ -24,7 +24,7 @@ export const getAllCredentialsIncludeServiceAccountKey = async (
   eventType: EventType
 ) => {
   let allCredentials = Array.isArray(user.credentials) ? user.credentials : [];
- 
+
   if (eventType?.team?.id) {
     const teamCredentialsQuery = await prisma.credential.findMany({
       where: {
@@ -33,10 +33,10 @@ export const getAllCredentialsIncludeServiceAccountKey = async (
       select: credentialForCalendarServiceSelect,
     });
     if (Array.isArray(teamCredentialsQuery)) {
-    allCredentials.push(...teamCredentialsQuery);
+      allCredentials.push(...teamCredentialsQuery);
     }
   }
-  
+
   if (eventType?.parentId) {
     const teamCredentialsQuery = await prisma.team.findFirst({
       where: {
@@ -60,7 +60,7 @@ export const getAllCredentialsIncludeServiceAccountKey = async (
   const { profile } = await new UserRepository(prisma).enrichUserWithItsProfile({
     user: user,
   });
-  
+
   if (profile?.organizationId) {
     const org = await prisma.team.findUnique({
       where: {
@@ -85,11 +85,15 @@ export const getAllCredentialsIncludeServiceAccountKey = async (
   const eventTypeCrmCredentials: Record<number, { enabled: boolean }> = {};
 
   for (const appKey in eventTypeAppMetadata) {
-    const app = eventTypeAppMetadata[appKey as keyof typeof eventTypeAppMetadata];
-    if (app.appCategories && app.appCategories.some((category: string) => category === "crm")) {
-      eventTypeCrmCredentials[app.credentialId] = {
-        enabled: app.enabled,
-      };
+    const app = eventTypeAppMetadata[appKey as keyof typeof eventTypeAppMetadata] as
+      | { appCategories?: string[]; credentialId?: number; enabled?: boolean }
+      | undefined;
+    if (app?.appCategories && app.appCategories.some((category: string) => category === "crm")) {
+      if (app.credentialId !== undefined) {
+        eventTypeCrmCredentials[app.credentialId] = {
+          enabled: app.enabled ?? false,
+        };
+      }
     }
   }
 

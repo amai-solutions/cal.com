@@ -1,19 +1,18 @@
 import dayjs from "@calcom/dayjs";
-import { getHostsAndGuests } from "@calcom/features/bookings/lib/getHostsAndGuests";
 import type { Host } from "@calcom/features/bookings/lib/getHostsAndGuests";
+import { getHostsAndGuests } from "@calcom/features/bookings/lib/getHostsAndGuests";
 import { sendGenericWebhookPayload } from "@calcom/features/webhooks/lib/sendPayload";
 import logger from "@calcom/lib/logger";
 import { safeStringify } from "@calcom/lib/safeStringify";
 import prisma from "@calcom/prisma";
 import type { TimeUnit } from "@calcom/prisma/enums";
 import { BookingStatus, WebhookTriggerEvents } from "@calcom/prisma/enums";
-
 import { getBooking } from "./getBooking";
 import { getMeetingSessionsFromRoomName } from "./getMeetingSessionsFromRoomName";
-import type { TWebhook, TTriggerNoShowPayloadSchema } from "./schema";
+import type { TTriggerNoShowPayloadSchema, TWebhook } from "./schema";
 import { ZSendNoShowWebhookPayloadSchema } from "./schema";
 
-type OriginalRescheduledBooking =
+type OriginalRescheduledBooking=
   | {
       rescheduledBy?: string | null;
     }
@@ -33,14 +32,19 @@ export function sendWebhookPayload(
   participants: ParticipantsWithEmail,
   originalRescheduledBooking?: OriginalRescheduledBooking,
   hostEmail?: string
-): Promise<any> {
+): Promise<{ ok: boolean; status: number } | undefined> {
   const maxStartTimeHumanReadable = dayjs.unix(maxStartTime).format("YYYY-MM-DD HH:mm:ss Z");
 
   return sendGenericWebhookPayload({
     secretKey: webhook.secret,
     triggerEvent,
     createdAt: new Date().toISOString(),
-    webhook,
+    webhook: {
+      subscriberUrl: webhook.subscriberUrl,
+      appId: webhook.appId,
+      payloadTemplate: webhook.payloadTemplate,
+      version: webhook.version,
+    },
     data: {
       title: booking.title,
       bookingId: booking.id,
@@ -78,6 +82,7 @@ export function sendWebhookPayload(
       webhook,
       e
     );
+    return undefined;
   });
 }
 
@@ -99,9 +104,9 @@ function checkIfGuestJoinedTheCall(email: string, allParticipants: ParticipantsW
 
 const getUserOrGuestById = async (id: string) => {
   // Try User table (numeric IDs)
-  if (!isNaN(Number(id))) {
+  if (!Number.isNaN(Number(id))) {
     const user = await prisma.user.findUnique({
-      where: { id: parseInt(id) },
+      where: { id: parseInt(id, 10) },
       select: { email: true },
     });
     if (user) return { email: user.email, isLoggedIn: true };
@@ -135,21 +140,24 @@ export async function getParticipantsWithEmail(
 
 export const log = logger.getSubLogger({ prefix: ["triggerNoShowTask"] });
 
-export const prepareNoShowTrigger = async (
+export const prepareNoShowTrigger= async (
   payload: string
-): Promise<{
-  booking: Booking;
-  webhook: TWebhook;
-  hosts: Host[];
-  hostsThatDidntJoinTheCall: Host[];
-  hostsThatJoinedTheCall: Host[];
-  numberOfHostsThatJoined: number;
-  didGuestJoinTheCall: boolean;
-  guestsThatJoinedTheCall: { email: string; name: string }[];
-  guestsThatDidntJoinTheCall: { email: string; name: string }[];
-  originalRescheduledBooking?: OriginalRescheduledBooking;
-  participants: ParticipantsWithEmail;
-} | void> => {
+): Promise<
+  | {
+      booking: Booking;
+      webhook: TWebhook;
+      hosts: Host[];
+      hostsThatDidntJoinTheCall: Host[];
+      hostsThatJoinedTheCall: Host[];
+      numberOfHostsThatJoined: number;
+      didGuestJoinTheCall: boolean;
+      guestsThatJoinedTheCall: { email: string; name: string }[];
+      guestsThatDidntJoinTheCall: { email: string; name: string }[];
+      originalRescheduledBooking?: OriginalRescheduledBooking;
+      participants: ParticipantsWithEmail;
+    }
+  | undefined
+> => {
   const { bookingId, webhook } = ZSendNoShowWebhookPayloadSchema.parse(JSON.parse(payload));
 
   const booking = await getBooking(bookingId);

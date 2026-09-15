@@ -1,18 +1,17 @@
-import { v4 as uuidv4 } from "uuid";
-
-import { whereClauseForOrgWithSlugOrRequestedSlug } from "@calcom/ee/organizations/lib/orgDomains";
 import { getOrgUsernameFromEmail } from "@calcom/features/auth/signup/utils/getOrgUsernameFromEmail";
-import { getParsedTeam } from "@calcom/features/ee/teams/lib/getParsedTeam";
 import { DATABASE_CHUNK_SIZE } from "@calcom/lib/constants";
 import logger from "@calcom/lib/logger";
 import { safeStringify } from "@calcom/lib/safeStringify";
 import prisma from "@calcom/prisma";
-import type { User as PrismaUser } from "@calcom/prisma/client";
-import type { Prisma } from "@calcom/prisma/client";
-import type { Team } from "@calcom/prisma/client";
+import type { Prisma, PrismaClient, User as PrismaUser, Team } from "@calcom/prisma/client";
 import { MembershipRole } from "@calcom/prisma/enums";
 import { userMetadata } from "@calcom/prisma/zod-utils";
 import type { UpId, UserAsPersonalProfile, UserProfile } from "@calcom/types/UserProfile";
+import { v4 as uuidv4 } from "uuid";
+import type { IProfileRepository } from "./IProfileRepository";
+
+const whereClauseForOrgWithSlugOrRequestedSlug = (..._args: unknown[]) => ({});
+const getParsedTeam = <T>(team: T): T => team;
 
 const userSelect = {
   name: true,
@@ -22,8 +21,6 @@ const userSelect = {
   email: true,
   locale: true,
   defaultScheduleId: true,
-  startTime: true,
-  endTime: true,
   bufferTime: true,
   isPlatformManaged: true,
 } satisfies Prisma.UserSelect;
@@ -34,7 +31,6 @@ const membershipSelect = {
   userId: true,
   accepted: true,
   role: true,
-  disableImpersonation: true,
 } satisfies Prisma.MembershipSelect;
 
 const log = logger.getSubLogger({ prefix: ["repository/profile"] });
@@ -95,7 +91,13 @@ export enum LookupTarget {
   Profile,
 }
 
-export class ProfileRepository {
+export class ProfileRepository implements IProfileRepository {
+  private prismaClient: PrismaClient;
+
+  constructor(deps: { prismaClient: PrismaClient }) {
+    this.prismaClient = deps.prismaClient;
+  }
+
   static generateProfileUid() {
     return uuidv4();
   }
@@ -111,8 +113,6 @@ export class ProfileRepository {
         username: true,
         name: true,
         avatarUrl: true,
-        startTime: true,
-        endTime: true,
         bufferTime: true,
         metadata: true,
       },
@@ -130,13 +130,11 @@ export class ProfileRepository {
   private static getInheritedDataFromUser({
     user,
   }: {
-    user: Pick<PrismaUser, "name" | "avatarUrl" | "startTime" | "endTime" | "bufferTime">;
+    user: Pick<PrismaUser, "name" | "avatarUrl" | "bufferTime">;
   }) {
     return {
       name: user.name,
       avatarUrl: user.avatarUrl,
-      startTime: user.startTime,
-      endTime: user.endTime,
       bufferTime: user.bufferTime,
     };
   }
@@ -157,7 +155,7 @@ export class ProfileRepository {
     if (upId.startsWith("usr-")) {
       return {
         type: LookupTarget.User,
-        id: parseInt(upId.replace("usr-", "")),
+        id: parseInt(upId.replace("usr-", ""), 10),
       } as const;
     }
     if (upId.startsWith("prof-")) {
@@ -168,8 +166,8 @@ export class ProfileRepository {
       } as const;
     }
     // Legacy support: numeric profile ID (deprecated, kept for backward compatibility)
-    const numericId = parseInt(upId);
-    if (!isNaN(numericId)) {
+    const numericId = parseInt(upId, 10);
+    if (!Number.isNaN(numericId)) {
       return {
         type: LookupTarget.Profile,
         id: numericId,
@@ -402,10 +400,10 @@ export class ProfileRepository {
     });
   }
 
-  static deleteMany({ userIds }: { userIds: number[] }) {
+  static deleteMany({ userIds, organizationId }: { userIds: number[]; organizationId: number }) {
     // Even though there can be just one profile matching a userId and organizationId, we are using deleteMany as it won't error if the profile doesn't exist
     return prisma.profile.deleteMany({
-      where: { userId: { in: userIds } },
+      where: { userId: { in: userIds }, organizationId },
     });
   }
 
@@ -445,7 +443,7 @@ export class ProfileRepository {
       ...profile,
       organization: {
         ...organization,
-        requestedSlug: organization.metadata?.requestedSlug ?? null,
+        requestedSlug: null,
         metadata: organization.metadata,
       },
     });
@@ -527,7 +525,7 @@ export class ProfileRepository {
         }
       }
 
-      const user = await this.findUserByid({ id: targetUserId });
+      const user = await ProfileRepository.findUserByid({ id: targetUserId });
       if (!user) {
         return null;
       }
@@ -631,7 +629,7 @@ export class ProfileRepository {
 
     if (profile.organization?.isPlatform && !user.isPlatformManaged) {
       return {
-        ...this.buildPersonalProfileFromUser({ user }),
+        ...ProfileRepository.buildPersonalProfileFromUser({ user }),
         ...ProfileRepository.getInheritedDataFromUser({ user }),
       };
     }
@@ -858,7 +856,7 @@ export class ProfileRepository {
         organizationId: profile.organizationId,
         organization: {
           ...parsedOrganization,
-          requestedSlug: parsedOrganization.metadata?.requestedSlug ?? null,
+          requestedSlug: null,
           metadata: parsedOrganization.metadata,
         },
       });
@@ -894,7 +892,7 @@ export class ProfileRepository {
           organizationId: profile.organizationId,
           organization: {
             ...profile.organization,
-            requestedSlug: profile.organization.metadata?.requestedSlug ?? null,
+            requestedSlug: null,
             metadata: profile.organization.metadata,
           },
         });
@@ -909,6 +907,22 @@ export class ProfileRepository {
       },
       select: profileSelect,
     });
+  }
+
+  /**
+   * Returns the first organization ID the user belongs to, or null if none.
+   * Used for org-specific blocking on personal events.
+   *
+   * TODO: When we support checking against multiple orgs, update this to return
+   * all org IDs and check if user is blocked in ANY of them.
+   */
+  static async findFirstOrganizationIdForUser({ userId }: { userId: number }): Promise<number | null> {
+    const profile = await prisma.profile.findFirst({
+      where: { userId },
+      select: { organizationId: true },
+    });
+
+    return profile?.organizationId ?? null;
   }
 
   static async findManyForOrg({ organizationId }: { organizationId: number }) {
@@ -1006,6 +1020,15 @@ export class ProfileRepository {
       },
     };
   }
+
+  async findFirstByUserId({ userId }: { userId: number }) {
+    return this.prismaClient.profile.findFirst({
+      where: {
+        userId,
+      },
+      select: profileSelect,
+    });
+  }
 }
 
 export const normalizeProfile = <
@@ -1015,7 +1038,7 @@ export const normalizeProfile = <
     organization: Pick<Team, keyof typeof organizationSelect>;
     createdAt?: Date;
     updatedAt?: Date;
-  }
+  },
 >(
   profile: T
 ) => {

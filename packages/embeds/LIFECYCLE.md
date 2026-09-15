@@ -1,6 +1,6 @@
-# Cal.com Embed Lifecycle Events
+# Cal.diy Embed Lifecycle Events
 
-This document details the lifecycle events and states of Cal.com embeds, showing the interaction flow between the parent page and the iframe.
+This document details the lifecycle events and states of Cal.diy embeds, showing the interaction flow between the parent page and the iframe.
 
 ## Embed Handshake (Core Communication)
 
@@ -19,7 +19,7 @@ See [embed-message-protocol.mermaid](./embed-message-protocol.mermaid) for the m
 
 ### Message Format
 
-All messages use the `originator: "CAL"` identifier to distinguish Cal.com embed messages:
+All messages use the `originator: "CAL"` identifier to distinguish Cal.diy embed messages:
 
 ```javascript
 // Parent → Iframe (Commands)
@@ -122,12 +122,14 @@ The embed system carefully manages visibility to prevent visual glitches:
     - Indicates: Booker has been reopened after modal was closed
     - Triggers: On subsequent linkReady events (viewId > 1) when modal is reopened without reload
     - Note: Distinguishes between first view (bookerViewed) and reopen (bookerReopened). Uses viewId to determine if it's a reopen.
+    - Applicability: Only applicable for prerendered modals that are now visible.
 
 13. **bookerReloaded Event**
     - Fired by: Iframe
     - Indicates: Booker has been reloaded (full page reload within modal)
     - Triggers: On linkReady after fullReload action is taken (when reloadInitiated flag is set)
     - Note: Distinguishes between first view (bookerViewed), reopen (bookerReopened), and reload (bookerReloaded). Fires only once per reload.
+    - Applicability: Only applicable for prerendered modals that are now visible.
 
 14. **bookerReady Event**
     - Fired by: Iframe

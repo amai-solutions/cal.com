@@ -1,24 +1,25 @@
-import type { z } from "zod";
-
-import { whereClauseForOrgWithSlugOrRequestedSlug } from "@calcom/ee/organizations/lib/orgDomains";
-import { getParsedTeam } from "@calcom/features/ee/teams/lib/getParsedTeam";
 import { ProfileRepository } from "@calcom/features/profile/repositories/ProfileRepository";
+import { getTranslation } from "@calcom/i18n/server";
 import { DEFAULT_SCHEDULE, getAvailabilityFromSchedule } from "@calcom/lib/availability";
 import { buildNonDelegationCredentials } from "@calcom/lib/delegationCredential";
 import logger from "@calcom/lib/logger";
 import { safeStringify } from "@calcom/lib/safeStringify";
-import { getTranslation } from "@calcom/lib/server/i18n";
 import { withSelectedCalendars } from "@calcom/lib/server/withSelectedCalendars";
 import type { PrismaClient } from "@calcom/prisma";
 import { availabilityUserSelect } from "@calcom/prisma";
-import type { User as UserType, DestinationCalendar, SelectedCalendar } from "@calcom/prisma/client";
+import type { DestinationCalendar, SelectedCalendar, User as UserType } from "@calcom/prisma/client";
 import { Prisma } from "@calcom/prisma/client";
+import type { IdentityProvider } from "@calcom/prisma/enums";
 import type { CreationSource } from "@calcom/prisma/enums";
-import { MembershipRole, BookingStatus } from "@calcom/prisma/enums";
+import { BookingStatus, MembershipRole } from "@calcom/prisma/enums";
 import { credentialForCalendarServiceSelect } from "@calcom/prisma/selects/credential";
 import { userSelect as prismaUserSelect } from "@calcom/prisma/selects/user";
 import { userMetadata } from "@calcom/prisma/zod-utils";
 import type { UpId, UserProfile } from "@calcom/types/UserProfile";
+import type { z } from "zod";
+
+const whereClauseForOrgWithSlugOrRequestedSlug = (..._args: unknown[]) => ({});
+const getParsedTeam = <T>(team: T): T => team;
 
 export type { UserWithLegacySelectedCalendars } from "@calcom/lib/server/withSelectedCalendars";
 export { withSelectedCalendars };
@@ -43,7 +44,6 @@ export type SessionUser = {
   createdDate: Date;
   hideBranding: boolean;
   twoFactorEnabled: boolean;
-  disableImpersonation: boolean;
   identityProvider: string | null;
   identityProviderId: string | null;
   brandColor: string | null;
@@ -82,6 +82,7 @@ const teamSelect = {
 
 const userSelect = {
   id: true,
+  uuid: true,
   username: true,
   name: true,
   email: true,
@@ -89,8 +90,6 @@ const userSelect = {
   bio: true,
   avatarUrl: true,
   timeZone: true,
-  startTime: true,
-  endTime: true,
   weekStart: true,
   bufferTime: true,
   hideBranding: true,
@@ -112,7 +111,6 @@ const userSelect = {
   receiveMonthlyDigestEmail: true,
   requiresBookerEmailVerification: true,
   verified: true,
-  disableImpersonation: true,
   locked: true,
   movedToProfileId: true,
   metadata: true,
@@ -120,6 +118,7 @@ const userSelect = {
   lastActiveAt: true,
   identityProvider: true,
   teams: true,
+  profiles: true,
 } satisfies Prisma.UserSelect;
 
 export class UserRepository {
@@ -339,6 +338,7 @@ export class UserRepository {
         locked: true,
         role: true,
         id: true,
+        uuid: true,
         username: true,
         name: true,
         email: true,
@@ -388,6 +388,21 @@ export class UserRepository {
     };
   }
 
+  async findSecondaryEmailByUserIdAndEmail({ userId, email }: { userId: number; email: string }) {
+    return this.prismaClient.secondaryEmail.findUnique({
+      where: {
+        userId_email: {
+          userId,
+          email,
+        },
+      },
+      select: {
+        id: true,
+        emailVerified: true,
+      },
+    });
+  }
+
   async findByUuid({ uuid }: { uuid: string }) {
     return this.prismaClient.user.findUnique({
       where: {
@@ -409,6 +424,83 @@ export class UserRepository {
         },
       },
       select: userSelect,
+    });
+  }
+
+  async findByIdsWithPagination({
+    ids,
+    search,
+    cursor,
+    limit,
+  }: {
+    ids: number[];
+    search?: string | null;
+    cursor?: number | null;
+    limit?: number | null;
+  }) {
+    const where: Record<string, unknown> = {
+      id: cursor ? { in: ids, gt: cursor } : { in: ids },
+    };
+
+    if (search) {
+      where.OR = [
+        { name: { contains: search, mode: "insensitive" } },
+        { email: { contains: search, mode: "insensitive" } },
+      ];
+    }
+
+    const users = await this.prismaClient.user.findMany({
+      where,
+      select: {
+        id: true,
+        name: true,
+        email: true,
+      },
+      orderBy: { id: "asc" },
+      ...(limit ? { take: limit + 1 } : {}),
+    });
+
+    if (!limit) {
+      return { users, nextCursor: undefined, total: users.length };
+    }
+
+    const hasMore = users.length > limit;
+    const items = hasMore ? users.slice(0, limit) : users;
+    const nextCursor = hasMore ? items[items.length - 1].id : undefined;
+
+    // Only count on the first page to avoid an extra query on every scroll
+    let total: number | undefined;
+    if (!cursor) {
+      const countWhere: Record<string, unknown> = {
+        id: { in: ids },
+      };
+      if (search) {
+        countWhere.OR = [
+          { name: { contains: search, mode: "insensitive" } },
+          { email: { contains: search, mode: "insensitive" } },
+        ];
+      }
+      total = await this.prismaClient.user.count({ where: countWhere });
+    }
+
+    return { users: items, nextCursor, total };
+  }
+
+  async findByUuids({ uuids }: { uuids: string[] }) {
+    if (uuids.length === 0) return [];
+    return this.prismaClient.user.findMany({
+      where: {
+        uuid: {
+          in: uuids,
+        },
+      },
+      select: {
+        id: true,
+        uuid: true,
+        name: true,
+        email: true,
+        avatarUrl: true,
+      },
     });
   }
 
@@ -459,6 +551,44 @@ export class UserRepository {
     return !!user.movedToProfileId;
   }
 
+  async swapPrimaryEmailWithSecondaryEmail({
+    userId,
+    secondaryEmailId,
+    oldPrimaryEmail,
+    oldPrimaryEmailVerified,
+    newPrimaryEmail,
+    userUpdateData,
+  }: {
+    userId: number;
+    secondaryEmailId: number;
+    oldPrimaryEmail: string;
+    oldPrimaryEmailVerified: Date | null;
+    newPrimaryEmail: string;
+    userUpdateData?: Prisma.UserUpdateInput;
+  }) {
+    const [, updatedUser] = await this.prismaClient.$transaction([
+      this.prismaClient.secondaryEmail.update({
+        where: {
+          id: secondaryEmailId,
+          userId: userId,
+        },
+        data: {
+          email: oldPrimaryEmail,
+          emailVerified: oldPrimaryEmailVerified,
+        },
+      }),
+      this.prismaClient.user.update({
+        where: { id: userId },
+        data: {
+          ...userUpdateData,
+          email: newPrimaryEmail,
+        },
+      }),
+    ]);
+
+    return updatedUser;
+  }
+
   async enrichUserWithTheProfile<T extends { username: string | null; id: number }>({
     user,
     upId,
@@ -490,7 +620,7 @@ export class UserRepository {
     T extends {
       id: number;
       username: string | null;
-    }
+    },
   >({
     user,
   }: {
@@ -533,7 +663,7 @@ export class UserRepository {
     T extends {
       id: number;
       username: string | null;
-    }
+    },
   >({
     user,
   }: {
@@ -589,7 +719,7 @@ export class UserRepository {
       if (!profileMap.has(profile.userId)) {
         profileMap.set(profile.userId, []);
       }
-      profileMap.get(profile.userId)!.push(profile);
+      profileMap.get(profile.userId)?.push(profile);
     });
 
     // Precompute personal profiles for all users
@@ -701,7 +831,7 @@ export class UserRepository {
             username: string | null;
             id: number;
           };
-        }
+        },
   >(entity: T) {
     if ("profile" in entity) {
       const { profile, ...entityWithoutProfile } = entity;
@@ -727,7 +857,9 @@ export class UserRepository {
       if (!profiles.length) {
         return {
           ...entity,
-          profile: ProfileRepository.buildPersonalProfileFromUser({ user: entity.user }),
+          profile: ProfileRepository.buildPersonalProfileFromUser({
+            user: entity.user,
+          }),
         };
       } else {
         return {
@@ -765,17 +897,21 @@ export class UserRepository {
 
   async create(
     data: Omit<Prisma.UserCreateInput, "password" | "organization" | "movedToProfile"> & {
-      username: string;
+      username: string | null;
       hashedPassword?: string;
       organizationId: number | null;
       creationSource: CreationSource;
       locked: boolean;
     }
   ) {
-    const organizationIdValue = data.organizationId;
-    const { email, username, creationSource, locked, hashedPassword, ...rest } = data;
+    const { email, username, creationSource, locked, hashedPassword, organizationId, ...rest } = data;
 
-    logger.info("create user", { email, username, organizationIdValue, locked });
+    log.info("create user", {
+      email,
+      username,
+      organizationId,
+      locked,
+    });
     const t = await getTranslation("en", "common");
     const availability = getAvailabilityFromSchedule(DEFAULT_SCHEDULE);
 
@@ -783,7 +919,9 @@ export class UserRepository {
       data: {
         username,
         email: email,
-        ...(hashedPassword && { password: { create: { hash: hashedPassword } } }),
+        ...(hashedPassword && {
+          password: { create: { hash: hashedPassword } },
+        }),
         // Default schedule
         schedules: {
           create: {
@@ -801,13 +939,13 @@ export class UserRepository {
         },
         creationSource,
         locked,
-        ...(organizationIdValue
+        ...(organizationId && username
           ? {
-              organizationId: organizationIdValue,
+              organizationId,
               profiles: {
                 create: {
                   username,
-                  organizationId: organizationIdValue,
+                  organizationId,
                   uid: ProfileRepository.generateProfileUid(),
                 },
               },
@@ -842,7 +980,9 @@ export class UserRepository {
                     members: {
                       some: {
                         id: userId,
-                        role: { in: [MembershipRole.ADMIN, MembershipRole.OWNER] },
+                        role: {
+                          in: [MembershipRole.ADMIN, MembershipRole.OWNER],
+                        },
                       },
                     },
                   },
@@ -1032,8 +1172,6 @@ export class UserRepository {
         avatarUrl: true,
         timeZone: true,
         weekStart: true,
-        startTime: true,
-        endTime: true,
         defaultScheduleId: true,
         bufferTime: true,
         theme: true,
@@ -1041,7 +1179,6 @@ export class UserRepository {
         createdDate: true,
         hideBranding: true,
         twoFactorEnabled: true,
-        disableImpersonation: true,
         identityProvider: true,
         identityProviderId: true,
         brandColor: true,
@@ -1049,6 +1186,7 @@ export class UserRepository {
         movedToProfileId: true,
         selectedCalendars: {
           select: {
+            id: true,
             eventTypeId: true,
             externalId: true,
             integration: true,
@@ -1154,13 +1292,6 @@ export class UserRepository {
     });
   }
 
-  async updateWhitelistWorkflows({ id, whitelistWorkflows }: { id: number; whitelistWorkflows: boolean }) {
-    return this.prismaClient.user.update({
-      where: { id },
-      data: { whitelistWorkflows },
-    });
-  }
-
   async findManyUsersForDynamicEventType({
     currentOrgDomain,
     usernameList,
@@ -1177,6 +1308,7 @@ export class UserRepository {
     return this.prismaClient.user.findMany({
       where,
       select: {
+        locked: true,
         allowDynamicBooking: true,
         ...availabilityUserSelect,
         credentials: {
@@ -1276,6 +1408,25 @@ export class UserRepository {
     });
   }
 
+  async findForPasswordReset({ id }: { id: number }) {
+    return this.prismaClient.user.findUnique({
+      where: { id },
+      select: {
+        email: true,
+        name: true,
+        locale: true,
+      },
+    });
+  }
+
+  async deleteMany({ userIds }: {userIds: number[]}){
+    await this.prismaClient.user.deleteMany({
+      where: {
+        id: { in: userIds },
+      },
+    });
+  }
+
   /**
    * Finds a user by ID returning only their username
    * @param userId - The user ID
@@ -1308,5 +1459,207 @@ export class UserRepository {
       },
     });
     return users.map(withSelectedCalendars);
+  }
+
+  async findByEmailAndTeamId({ email, teamId }: { email: string; teamId: number }) {
+    return this.prismaClient.user.findFirst({
+      where: {
+        email: email.toLowerCase(),
+        teams: {
+          some: {
+            teamId,
+            accepted: true,
+          },
+        },
+      },
+      select: userSelect,
+    });
+  }
+
+  async findByIdWithSelectedCalendars({ userId }: { userId: number }) {
+    return this.prismaClient.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        selectedCalendars: true,
+        destinationCalendar: true,
+      },
+    });
+  }
+
+  async findByEmailWithInvitedTo({ email }: { email: string } ) {
+    return this.prismaClient.user.findUnique({
+      where: {
+        email: email.toLowerCase()
+      },
+      select: {
+        invitedTo: true
+      }
+    })
+  }
+
+  async findByUsernameAndOrganizationId({
+    username,
+    organizationId,
+    excludeEmail,
+  }: {
+    username: string,
+    organizationId: number | null,
+    excludeEmail: string
+  }) {
+    return this.prismaClient.user.findFirst({
+      where: {
+        username,
+        organizationId,
+        NOT: { email: excludeEmail }
+      },
+      select: {
+        id: true
+      }
+    })
+  }
+
+  async lockByEmail({ email }: { email: string }) {
+    await this.prismaClient.user.updateMany({
+      where: { email },
+      data: { locked: true },
+    });
+  }
+
+  async unlockByEmail({
+    email,
+  }: {
+    email: string;
+  }): Promise<{ email: string; username: string | null } | null> {
+    const user = await this.prismaClient.user.findFirst({
+      where: { email, locked: true },
+      select: { id: true, email: true, username: true },
+    });
+
+    if (!user) return null;
+
+    await this.prismaClient.user.update({
+      where: { id: user.id },
+      data: { locked: false },
+    });
+
+    return { email: user.email, username: user.username };
+  }
+
+  async upsertForSignup({
+    email,
+    username,
+    hashedPassword,
+    organizationId,
+    emailVerified,
+    identityProvider,
+  }: {
+    email: string;
+    username: string | null;
+    hashedPassword: string;
+    organizationId: number | null;
+    emailVerified: Date;
+    identityProvider: IdentityProvider;
+  }) {
+    return this.prismaClient.user.upsert({
+      where: { email },
+      update: {
+        username,
+        emailVerified,
+        identityProvider,
+        password: {
+          upsert: {
+            create: { hash: hashedPassword },
+            update: { hash: hashedPassword },
+          },
+        },
+        organizationId,
+      },
+      create: {
+        username,
+        email,
+        emailVerified,
+        identityProvider,
+        password: { create: { hash: hashedPassword } },
+        organizationId,
+      },
+      select: { id: true },
+    });
+  }
+  async listUsers({
+    searchTerm,
+    cursor,
+    limit,
+  }: {
+    searchTerm?: string | null;
+    cursor: number | null | undefined;
+    limit?: number | null;
+  }) {
+    const bothLockedAndUnlockedWhere: Prisma.UserWhereInput = {
+      OR: [{ locked: false }, { locked: true }],
+    };
+    const trimmedSearchTerm = searchTerm?.trim();
+    const searchFilters: Prisma.UserWhereInput = trimmedSearchTerm
+      ? {
+        AND: [
+          // To bypass the excludeLockedUsersExtension
+          bothLockedAndUnlockedWhere,
+          {
+            OR: [
+              { email: { contains: trimmedSearchTerm, mode: "insensitive" } },
+              { username: { contains: trimmedSearchTerm, mode: "insensitive" } },
+              {
+                profiles: {
+                  some: {
+                    username: { contains: trimmedSearchTerm, mode: "insensitive" },
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      }
+      // To bypass the excludeLockedUsersExtension
+      : bothLockedAndUnlockedWhere;
+
+    const hasLimit = limit !== undefined && limit !== null;
+    const take = hasLimit ? limit + 1 : undefined; // +1 lets us detect "has more" for the cursor
+
+    const users = await this.prismaClient.user.findMany({
+      cursor: cursor ? { id: cursor } : undefined,
+      skip: cursor ? 1 : 0,
+      ...(take !== undefined ? { take } : {}),
+      where: searchFilters,
+      orderBy: {
+        id: "asc",
+      },
+      select: {
+        id: true,
+        locked: true,
+        email: true,
+        username: true,
+        name: true,
+        timeZone: true,
+        role: true,
+        profiles: {
+          select: {
+            username: true,
+          },
+        },
+      },
+    });
+
+    if (!hasLimit) {
+      return { users, nextCursor: undefined, total: users.length };
+    }
+
+    const total = await this.prismaClient.user.count({
+      where: searchFilters,
+    });
+    const hasMore = users.length > limit;
+    const items = hasMore ? users.slice(0, limit) : users;
+    const nextCursor = hasMore ? items[items.length - 1].id : undefined;
+    return { users: items, nextCursor, total };
   }
 }

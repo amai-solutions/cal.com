@@ -1,4 +1,5 @@
 import { PrismaBookingReportRepository } from "@calcom/features/bookingReport/repositories/PrismaBookingReportRepository";
+
 import handleCancelBooking from "@calcom/features/bookings/lib/handleCancelBooking";
 import { BookingRepository } from "@calcom/features/bookings/repositories/BookingRepository";
 import { BookingAccessService } from "@calcom/features/bookings/services/BookingAccessService";
@@ -90,6 +91,7 @@ export const reportBookingHandler = async ({ ctx, input }: ReportBookingOptions)
           ...(seatReferenceUid ? { seatReferenceUid } : {}),
         },
         userId: user.id,
+
       });
       didCancel = true;
     } catch (error) {

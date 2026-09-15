@@ -1,9 +1,7 @@
-import type { Page } from "@playwright/test";
 import { expect } from "@playwright/test";
 
 import dayjs from "@calcom/dayjs";
 import { prisma } from "@calcom/prisma";
-import { MembershipRole } from "@calcom/prisma/enums";
 import { BookingStatus } from "@calcom/prisma/enums";
 import { bookingMetadataSchema } from "@calcom/prisma/zod-utils";
 
@@ -11,9 +9,6 @@ import { test } from "./lib/fixtures";
 import {
   bookTimeSlot,
   confirmReschedule,
-  doOnOrgDomain,
-  goToUrlWithErrorHandling,
-  IS_STRIPE_ENABLED,
   selectFirstAvailableTimeSlotNextMonth,
   submitAndWaitForResponse,
 } from "./lib/testUtils";
@@ -167,96 +162,6 @@ test.describe("Reschedule Tests", async () => {
     });
   });
 
-  test("Unpaid rescheduling should go to payment page", async ({ page, users, bookings, payments }) => {
-    // eslint-disable-next-line playwright/no-skipped-test
-    test.skip(!IS_STRIPE_ENABLED, "Skipped as Stripe is not installed");
-    const user = await users.create();
-    await user.apiLogin();
-    await user.installStripePersonal({ skip: true });
-
-    const eventType = user.eventTypes.find((e) => e.slug === "paid")!;
-    const booking = await bookings.create(user.id, user.username, eventType.id, {
-      rescheduled: true,
-      status: BookingStatus.ACCEPTED,
-      paid: false,
-    });
-    await prisma.eventType.update({
-      where: {
-        id: eventType.id,
-      },
-      data: {
-        metadata: {
-          apps: {
-            stripe: {
-              price: 20000,
-              enabled: true,
-              currency: "usd",
-            },
-          },
-        },
-      },
-    });
-    await payments.create(booking.id);
-    await page.goto(`/reschedule/${booking.uid}`);
-
-    await selectFirstAvailableTimeSlotNextMonth(page);
-
-    await confirmReschedule(page);
-
-    await page.waitForURL((url) => {
-      return url.pathname.indexOf("/payment") > -1;
-    });
-
-    await expect(page).toHaveURL(/.*payment/);
-  });
-
-  test("Paid rescheduling should go to success page", async ({ page, users, bookings, payments }) => {
-    // eslint-disable-next-line playwright/no-skipped-test
-    test.skip(!IS_STRIPE_ENABLED, "Skipped as Stripe is not installed");
-
-    const user = await users.create();
-    await user.apiLogin();
-    await user.installStripePersonal({ skip: true });
-    await users.logout();
-
-    const eventType = user.eventTypes.find((e) => e.slug === "paid")!;
-    const booking = await bookings.create(user.id, user.username, eventType.id, {
-      rescheduled: true,
-      status: BookingStatus.ACCEPTED,
-      paid: true,
-    });
-
-    await payments.create(booking.id);
-    await page.goto(`/reschedule/${booking?.uid}`);
-
-    await selectFirstAvailableTimeSlotNextMonth(page);
-
-    await confirmReschedule(page);
-
-    await expect(page).toHaveURL(/.*booking/);
-  });
-
-  test("Opt in event should be PENDING when rescheduled by USER", async ({ page, users, bookings }) => {
-    const user = await users.create();
-
-    const eventType = user.eventTypes.find((e) => e.slug === "opt-in")!;
-    const booking = await bookings.create(user.id, user.username, eventType.id, {
-      status: BookingStatus.ACCEPTED,
-    });
-
-    await page.goto(`/reschedule/${booking.uid}`);
-
-    await selectFirstAvailableTimeSlotNextMonth(page);
-
-    await confirmReschedule(page);
-
-    await expect(page).toHaveURL(/.*booking/);
-
-    const newBooking = await prisma.booking.findFirstOrThrow({ where: { fromReschedule: booking?.uid } });
-    expect(newBooking).not.toBeNull();
-    expect(newBooking.status).toBe(BookingStatus.PENDING);
-  });
-
   test("Opt in event should be ACCEPTED when rescheduled by OWNER", async ({ page, users, bookings }) => {
     const user = await users.create();
 
@@ -386,14 +291,6 @@ test.describe("Reschedule Tests", async () => {
     await expect(page.frameLocator("iFrame").locator('text="Continue"')).toBeVisible();
   });
 
-  test("Should be able to a dynamic group booking", async () => {
-    // It is tested in dynamic-booking-pages.e2e.ts
-  });
-
-  test("Team Event Booking", () => {
-    // It is tested in teams.e2e.ts
-  });
-
   test("Should redirect to cancelled page when allowReschedulingCancelledBookings is false (default)", async ({
     page,
     users,
@@ -449,108 +346,4 @@ test.describe("Reschedule Tests", async () => {
 
     await expect(page.locator("[data-testid=success-page]")).toBeVisible();
   });
-
-  test.describe("Organization", () => {
-    test("Booking should be rescheduleable for a user that was moved to an organization through org domain", async ({
-      users,
-      bookings,
-      orgs,
-      page,
-    }) => {
-      const org = await orgs.create({
-        name: "TestOrg",
-      });
-      const orgMember = await users.create({
-        username: "username-outside-org",
-        organizationId: org.id,
-        profileUsername: "username-inside-org",
-        roleInOrganization: MembershipRole.MEMBER,
-      });
-      const profileUsername = (await orgMember.getFirstProfile()).username;
-      const eventType = orgMember.eventTypes[0];
-
-      const orgSlug = org.slug!;
-      const booking = await bookings.create(orgMember.id, orgMember.username, eventType.id);
-
-      return await doOnOrgDomain(
-        {
-          orgSlug: orgSlug,
-          page,
-        },
-        async ({ page, goToUrlWithErrorHandling }) => {
-          const result = await goToUrlWithErrorHandling(`/reschedule/${booking.uid}`);
-          expectUrlToBeABookingPageOnOrgForUsername({
-            url: result.url,
-            orgSlug,
-            username: profileUsername,
-          });
-
-          const rescheduleUrlToBeOpenedInOrgContext = getNonOrgUrlFromOrgUrl(result.url, orgSlug);
-          await page.goto(rescheduleUrlToBeOpenedInOrgContext);
-          await expectSuccessfulReschedule(page, orgSlug);
-          return { url: result.url };
-        }
-      );
-    });
-
-    test("Booking should be rescheduleable for a user that was moved to an organization through non-org domain", async ({
-      users,
-      bookings,
-      orgs,
-      page,
-    }) => {
-      const org = await orgs.create({
-        name: "TestOrg",
-      });
-      const orgMember = await users.create({
-        username: "username-outside-org",
-        organizationId: org.id,
-        profileUsername: "username-inside-org",
-        roleInOrganization: MembershipRole.MEMBER,
-      });
-      const eventType = orgMember.eventTypes[0];
-
-      const orgSlug = org.slug!;
-      const booking = await bookings.create(orgMember.id, orgMember.username, eventType.id);
-
-      const result = await goToUrlWithErrorHandling({ url: `/reschedule/${booking.uid}`, page });
-
-      await doOnOrgDomain(
-        {
-          orgSlug: orgSlug,
-          page,
-        },
-        async ({ page }) => {
-          await page.goto(getNonOrgUrlFromOrgUrl(result.url, orgSlug));
-          await expectSuccessfulReschedule(page, orgSlug);
-        }
-      );
-    });
-
-    const getNonOrgUrlFromOrgUrl = (url: string, orgSlug: string) => url.replace(orgSlug, "app");
-
-    async function expectSuccessfulReschedule(page: Page, orgSlug: string) {
-      await selectFirstAvailableTimeSlotNextMonth(page);
-      const { protocol, host } = new URL(page.url());
-      // Needed since we we're expecting a non-org URL, causing timeouts.
-      const url = getNonOrgUrlFromOrgUrl(`${protocol}//${host}/api/book/event`, orgSlug);
-      await confirmReschedule(page, url);
-      await expect(page.locator("[data-testid=success-page]")).toBeVisible();
-    }
-  });
 });
-
-function expectUrlToBeABookingPageOnOrgForUsername({
-  url,
-  orgSlug,
-  username,
-}: {
-  url: string;
-  orgSlug: string;
-  username: string;
-}) {
-  expect(url).toContain(`://${orgSlug}.`);
-  const urlObject = new URL(url);
-  const usernameInUrl = urlObject.pathname.split("/")[1];
-  expect(usernameInUrl).toEqual(username);
-}

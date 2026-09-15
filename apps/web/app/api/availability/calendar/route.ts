@@ -12,7 +12,7 @@ import {
 import { UserRepository } from "@calcom/features/users/repositories/UserRepository";
 import { HttpError } from "@calcom/lib/http-error";
 import notEmpty from "@calcom/lib/notEmpty";
-import { SelectedCalendarRepository } from "@calcom/lib/server/repository/selectedCalendar";
+import { SelectedCalendarRepository } from "@calcom/features/selectedCalendar/repositories/SelectedCalendarRepository";
 import prisma from "@calcom/prisma";
 
 import { buildLegacyRequest } from "@lib/buildLegacyCtx";
@@ -44,7 +44,7 @@ async function authMiddleware() {
   return userWithCredentials;
 }
 
-// TODO: It doesn't seem to be used from within the app. It is possible that someone outside Cal.com is using this GET endpoint
+// TODO: It doesn't seem to be used from within the app. It is possible that someone outside Cal.diy is using this GET endpoint
 async function getHandler() {
   const user = await authMiddleware();
 
@@ -91,8 +91,7 @@ async function deleteHandler(req: NextRequest) {
   const user = await authMiddleware();
   const searchParams = Object.fromEntries(req.nextUrl.searchParams.entries());
 
-  const { integration, externalId, eventTypeId } =
-    selectedCalendarSelectSchema.parse(searchParams);
+  const { integration, externalId, eventTypeId } = selectedCalendarSelectSchema.parse(searchParams);
 
   await SelectedCalendarRepository.delete({
     where: {

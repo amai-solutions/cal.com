@@ -2,8 +2,7 @@ import { useState } from "react";
 
 import { Dialog } from "@calcom/features/components/controlled-dialog";
 import { useLocale } from "@calcom/lib/hooks/useLocale";
-import { trpc } from "@calcom/trpc/react";
-import type { AppRouter } from "@calcom/trpc/types/server/routers/_app";
+import { trpc, type RouterOutputs } from "@calcom/trpc/react";
 import { Button } from "@calcom/ui/components/button";
 import { ConfirmationDialogContent } from "@calcom/ui/components/dialog";
 import {
@@ -16,10 +15,7 @@ import {
 } from "@calcom/ui/components/dropdown";
 import { showToast } from "@calcom/ui/components/toast";
 
-import type { inferRouterOutputs } from "@trpc/server";
-
-type RouterOutput = inferRouterOutputs<AppRouter>;
-type Credentials = RouterOutput["viewer"]["apps"]["appCredentialsByType"]["credentials"];
+type Credentials = RouterOutputs["viewer"]["apps"]["appCredentialsByType"]["credentials"];
 
 interface Props {
   credentials: Credentials;
@@ -82,12 +78,12 @@ export function MultiDisconnectIntegration({ credentials, onSuccess }: Props) {
                   setCredentialToDelete({
                     id: cred.id,
                     teamId: cred.teamId,
-                    name: cred.team?.name || getUserDisplayName(cred.user) || null,
+                    name: getUserDisplayName(cred.user) || null,
                   });
                   setConfirmationDialogOpen(true);
                 }}>
                 <div className="flex flex-col text-left">
-                  <span>{cred.team?.name || getUserDisplayName(cred.user) || t("unnamed")}</span>
+                  <span>{getUserDisplayName(cred.user) || t("unnamed")}</span>
                 </div>
               </DropdownItem>
             </DropdownMenuItem>

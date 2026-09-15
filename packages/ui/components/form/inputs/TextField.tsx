@@ -1,11 +1,11 @@
 "use client";
 
-import { cva } from "class-variance-authority";
-import React, { forwardRef, useId, useState } from "react";
-
 import { useLocale } from "@calcom/lib/hooks/useLocale";
 import classNames from "@calcom/ui/classNames";
-
+import { InfoIcon } from "@coss/ui/icons";
+import { cva } from "class-variance-authority";
+import type React from "react";
+import { forwardRef, useId, useState } from "react";
 import { Icon } from "../../icon";
 import { HintsOrErrors } from "./HintOrErrors";
 import { Label } from "./Label";
@@ -211,7 +211,7 @@ export const InputField = forwardRef<HTMLInputElement, InputFieldProps>(function
           {type === "search" && inputValue?.toString().length > 0 && (
             <Icon
               name="x"
-              className="text-subtle absolute top-2.5 h-4 w-4 cursor-pointer ltr:right-2 rtl:left-2"
+              className="text-subtle absolute top-1.75 h-4 w-4 cursor-pointer ltr:right-2 rtl:left-2"
               onClick={(e) => {
                 setInputValue("");
                 props.onChange?.(e as unknown as React.ChangeEvent<HTMLInputElement>);
@@ -226,8 +226,12 @@ export const InputField = forwardRef<HTMLInputElement, InputFieldProps>(function
           placeholder={placeholder}
           size={size}
           className={classNames(
-            className,
-            "disabled:bg-subtle disabled:hover:border-subtle disabled:cursor-not-allowed"
+            "w-full min-w-0 truncate focus:outline-none focus:ring-0",
+            "text-default rounded-lg text-sm font-medium leading-none",
+            "placeholder:text-muted disabled:cursor-not-allowed",
+            addOnLeading && "rounded-none pl-0.5 pr-0",
+            addOnSuffix && !addOnLeading && "pl-0.5",
+            className
           )}
           {...passThrough}
           readOnly={readOnly}
@@ -237,7 +241,12 @@ export const InputField = forwardRef<HTMLInputElement, InputFieldProps>(function
         />
       )}
       <HintsOrErrors hintErrors={hintErrors} fieldName={name} t={t} />
-      {hint && <div className="text-default mt-2 flex items-center text-sm">{hint}</div>}
+      {hint && (
+        <div className="text-muted mt-2 flex items-center text-sm">
+          <InfoIcon className="text-muted h-4 w-4 mr-1" />
+          {hint}
+        </div>
+      )}
     </div>
   );
 });

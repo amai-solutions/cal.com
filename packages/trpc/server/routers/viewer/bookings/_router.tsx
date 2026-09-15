@@ -1,4 +1,6 @@
+import { MembershipRole } from "@calcom/prisma/enums";
 import authedProcedure from "../../../procedures/authedProcedure";
+import { createTeamPbacProcedure } from "../../../procedures/pbacProcedures";
 import publicProcedure from "../../../procedures/publicProcedure";
 import { router } from "../../../trpc";
 import { ZAddGuestsInputSchema } from "./addGuests.schema";
@@ -6,12 +8,15 @@ import { ZConfirmInputSchema } from "./confirm.schema";
 import { ZEditLocationInputSchema } from "./editLocation.schema";
 import { ZFindInputSchema } from "./find.schema";
 import { ZGetInputSchema } from "./get.schema";
-import { ZGetAuditLogsInputSchema } from "./getAuditLogs.schema";
 import { ZGetBookingAttendeesInputSchema } from "./getBookingAttendees.schema";
 import { ZGetBookingDetailsInputSchema } from "./getBookingDetails.schema";
-import { ZInstantBookingInputSchema } from "./getInstantBookingLocation.schema";
+import { ZGetBookingHistoryInputSchema } from "./getBookingHistory.schema";
+import { ZGetWrongAssignmentReportsInputSchema } from "./getWrongAssignmentReports.schema";
+import { ZHasWrongAssignmentReportInputSchema } from "./hasWrongAssignmentReport.schema";
 import { ZReportBookingInputSchema } from "./reportBooking.schema";
+import { ZReportWrongAssignmentInputSchema } from "./reportWrongAssignment.schema";
 import { ZRequestRescheduleInputSchema } from "./requestReschedule.schema";
+import { ZUpdateWrongAssignmentReportStatusInputSchema } from "./updateWrongAssignmentReportStatus.schema";
 import { bookingsProcedure } from "./util";
 
 export const bookingsRouter = router({
@@ -30,6 +35,7 @@ export const bookingsRouter = router({
     return requestRescheduleHandler({
       ctx,
       input,
+      source: "WEBAPP",
     });
   }),
 
@@ -39,6 +45,7 @@ export const bookingsRouter = router({
     return editLocationHandler({
       ctx,
       input,
+      actionSource: "WEBAPP",
     });
   }),
 
@@ -48,6 +55,7 @@ export const bookingsRouter = router({
     return addGuestsHandler({
       ctx,
       input,
+      actionSource: "WEBAPP",
     });
   }),
 
@@ -89,17 +97,6 @@ export const bookingsRouter = router({
     });
   }),
 
-  getInstantBookingLocation: publicProcedure
-    .input(ZInstantBookingInputSchema)
-    .query(async ({ input, ctx }) => {
-      const { getHandler } = await import("./getInstantBookingLocation.handler");
-
-      return getHandler({
-        ctx,
-        input,
-      });
-    }),
-
   reportBooking: authedProcedure.input(ZReportBookingInputSchema).mutation(async ({ input, ctx }) => {
     const { reportBookingHandler } = await import("./reportBooking.handler");
 
@@ -108,12 +105,57 @@ export const bookingsRouter = router({
       input,
     });
   }),
-  getAuditLogs: authedProcedure.input(ZGetAuditLogsInputSchema).query(async ({ input, ctx }) => {
-    const { getAuditLogsHandler } = await import("./getAuditLogs.handler");
+  reportWrongAssignment: authedProcedure
+    .input(ZReportWrongAssignmentInputSchema)
+    .mutation(async ({ input, ctx }) => {
+      const { reportWrongAssignmentHandler } = await import("./reportWrongAssignment.handler");
 
-    return getAuditLogsHandler({
+      return reportWrongAssignmentHandler({
+        ctx,
+        input,
+      });
+    }),
+  hasWrongAssignmentReport: authedProcedure
+    .input(ZHasWrongAssignmentReportInputSchema)
+    .query(async ({ input, ctx }) => {
+      const { hasWrongAssignmentReportHandler } = await import("./hasWrongAssignmentReport.handler");
+
+      return hasWrongAssignmentReportHandler({
+        ctx,
+        input,
+      });
+    }),
+  getBookingHistory: authedProcedure.input(ZGetBookingHistoryInputSchema).query(async ({ input, ctx }) => {
+    const { getBookingHistoryHandler } = await import("./getBookingHistory.handler");
+
+    return getBookingHistoryHandler({
       ctx,
       input,
     });
   }),
+  getWrongAssignmentReports: createTeamPbacProcedure("booking.readTeamBookings", [
+    MembershipRole.ADMIN,
+    MembershipRole.OWNER,
+    MembershipRole.MEMBER,
+  ])
+    .input(ZGetWrongAssignmentReportsInputSchema)
+    .query(async ({ input }) => {
+      const { getWrongAssignmentReportsHandler } = await import("./getWrongAssignmentReports.handler");
+
+      return getWrongAssignmentReportsHandler({
+        input,
+      });
+    }),
+  updateWrongAssignmentReportStatus: authedProcedure
+    .input(ZUpdateWrongAssignmentReportStatusInputSchema)
+    .mutation(async ({ input, ctx }) => {
+      const { updateWrongAssignmentReportStatusHandler } = await import(
+        "./updateWrongAssignmentReportStatus.handler"
+      );
+
+      return updateWrongAssignmentReportStatusHandler({
+        ctx,
+        input,
+      });
+    }),
 });

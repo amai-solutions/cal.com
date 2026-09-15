@@ -1,8 +1,12 @@
 import { BOOKING_DI_TOKENS } from "@calcom/features/bookings/di/tokens";
-import { BOOKING_AUDIT_DI_TOKENS } from "@calcom/features/booking-audit/di/tokens";
+import { EVENT_TYPE_DI_TOKENS } from "@calcom/features/eventtypes/di/tokens";
+import { FEATURE_OPT_IN_DI_TOKENS } from "@calcom/features/feature-opt-in/di/tokens";
+import { FLAGS_DI_TOKENS } from "@calcom/features/flags/di/tokens";
 import { HASHED_LINK_DI_TOKENS } from "@calcom/features/hashedLink/di/tokens";
-import { ORGANIZATION_DI_TOKENS } from "@calcom/features/ee/organizations/di/tokens";
+import { OAUTH_DI_TOKENS } from "@calcom/features/oauth/di/tokens";
+import { TRANSLATION_DI_TOKENS } from "@calcom/features/translation/di/tokens";
 import { WATCHLIST_DI_TOKENS } from "./watchlist/Watchlist.tokens";
+import { WEBHOOK_TOKENS } from "./webhooks/Webhooks.tokens";
 
 export const DI_TOKENS = {
   PRISMA_CLIENT: Symbol("PrismaClient"),
@@ -15,8 +19,6 @@ export const DI_TOKENS = {
   SCHEDULE_REPOSITORY_MODULE: Symbol("ScheduleRepositoryModule"),
   SELECTED_SLOT_REPOSITORY: Symbol("SelectedSlotRepository"),
   SELECTED_SLOT_REPOSITORY_MODULE: Symbol("SelectedSlotRepositoryModule"),
-  TEAM_REPOSITORY: Symbol("TeamRepository"),
-  TEAM_REPOSITORY_MODULE: Symbol("TeamRepositoryModule"),
   USER_REPOSITORY: Symbol("UserRepository"),
   USER_REPOSITORY_MODULE: Symbol("UserRepositoryModule"),
   BOOKING_REPOSITORY: Symbol("BookingRepository"),
@@ -25,16 +27,10 @@ export const DI_TOKENS = {
   BOOKING_ACCESS_SERVICE_MODULE: Symbol("BookingAccessServiceModule"),
   EVENT_TYPE_REPOSITORY: Symbol("EventTypeRepository"),
   EVENT_TYPE_REPOSITORY_MODULE: Symbol("EventTypeRepositoryModule"),
-  ROUTING_FORM_RESPONSE_REPOSITORY: Symbol("RoutingFormResponseRepository"),
-  ROUTING_FORM_RESPONSE_REPOSITORY_MODULE: Symbol("RoutingFormResponseRepositoryModule"),
   AVAILABLE_SLOTS_SERVICE: Symbol("AvailableSlotsService"),
   AVAILABLE_SLOTS_SERVICE_MODULE: Symbol("AvailableSlotsModule"),
-  INSIGHTS_ROUTING_SERVICE: Symbol("InsightsRoutingService"),
-  INSIGHTS_ROUTING_SERVICE_MODULE: Symbol("InsightsRoutingServiceModule"),
-  INSIGHTS_BOOKING_SERVICE: Symbol("InsightsBookingService"),
-  INSIGHTS_BOOKING_SERVICE_MODULE: Symbol("InsightsBookingServiceModule"),
-  FEATURES_REPOSITORY: Symbol("FeaturesRepository"),
-  FEATURES_REPOSITORY_MODULE: Symbol("FeaturesRepositoryModule"),
+  ...FLAGS_DI_TOKENS,
+  ...FEATURE_OPT_IN_DI_TOKENS,
   CHECK_BOOKING_LIMITS_SERVICE: Symbol("CheckBookingLimitsService"),
   CHECK_BOOKING_LIMITS_SERVICE_MODULE: Symbol("CheckBookingLimitsServiceModule"),
   CHECK_BOOKING_AND_DURATION_LIMITS_SERVICE: Symbol("CheckBookingAndDurationLimitsService"),
@@ -57,20 +53,26 @@ export const DI_TOKENS = {
   HOST_REPOSITORY_MODULE: Symbol("HostRepositoryModule"),
   HOLIDAY_REPOSITORY: Symbol("HolidayRepository"),
   HOLIDAY_REPOSITORY_MODULE: Symbol("HolidayRepositoryModule"),
-  ATTRIBUTE_REPOSITORY: Symbol("AttributeRepository"),
-  ATTRIBUTE_REPOSITORY_MODULE: Symbol("AttributeRepositoryModule"),
+  PROFILE_REPOSITORY: Symbol("ProfileRepository"),
+  PROFILE_REPOSITORY_MODULE: Symbol("ProfileRepositoryModule"),
   MEMBERSHIP_SERVICE: Symbol("MembershipService"),
   MEMBERSHIP_SERVICE_MODULE: Symbol("MembershipServiceModule"),
   ASSIGNMENT_REASON_REPOSITORY: Symbol("AssignmentReasonRepository"),
   ASSIGNMENT_REASON_REPOSITORY_MODULE: Symbol("AssignmentReasonRepositoryModule"),
   CREDENTIAL_REPOSITORY: Symbol("CredentialRepository"),
   CREDENTIAL_REPOSITORY_MODULE: Symbol("CredentialRepositoryModule"),
+  DESTINATION_CALENDAR_REPOSITORY: Symbol("DestinationCalendarRepository"),
+  DESTINATION_CALENDAR_REPOSITORY_MODULE: Symbol("DestinationCalendarRepositoryModule"),
   MANAGED_EVENT_REASSIGNMENT_SERVICE: Symbol("ManagedEventReassignmentService"),
   MANAGED_EVENT_REASSIGNMENT_SERVICE_MODULE: Symbol("ManagedEventReassignmentServiceModule"),
+  ORG_MEMBERSHIP_LOOKUP: Symbol("OrgMembershipLookup"),
+  ORG_MEMBERSHIP_LOOKUP_MODULE: Symbol("OrgMembershipLookupModule"),
   // Booking service tokens
-  ...BOOKING_AUDIT_DI_TOKENS,
   ...BOOKING_DI_TOKENS,
   ...HASHED_LINK_DI_TOKENS,
+  ...OAUTH_DI_TOKENS,
   ...WATCHLIST_DI_TOKENS,
-  ...ORGANIZATION_DI_TOKENS,
+  ...TRANSLATION_DI_TOKENS,
+  ...WEBHOOK_TOKENS,
+  ...EVENT_TYPE_DI_TOKENS,
 };

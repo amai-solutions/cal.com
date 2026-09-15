@@ -39,9 +39,16 @@ export const duplicateHandler = async ({ ctx, input }: DuplicateOptions) => {
           },
         },
         hosts: true,
-        team: true,
-        workflows: true,
-        webhooks: true,
+        team: {
+          select: {
+            id: true,
+          },
+        },
+        webhooks: {
+          select: {
+            id: true,
+          },
+        },
         hashedLink: true,
         destinationCalendar: true,
         calVideoSettings: {
@@ -92,7 +99,6 @@ export const duplicateHandler = async ({ ctx, input }: DuplicateOptions) => {
       eventTypeColor,
       customReplyToEmail,
       metadata,
-      workflows,
       hashedLink,
       destinationCalendar,
 
@@ -101,8 +107,7 @@ export const duplicateHandler = async ({ ctx, input }: DuplicateOptions) => {
       webhooks: _webhooks,
 
       schedule: _schedule,
-      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-      // @ts-ignore - descriptionAsSafeHTML is added on the fly using a prisma middleware it shouldn't be used to create event type. Such a property doesn't exist on schema
+      // @ts-expect-error - descriptionAsSafeHTML is added on the fly using a prisma middleware it shouldn't be used to create event type. Such a property doesn't exist on schema
       descriptionAsSafeHTML: _descriptionAsSafeHTML,
       secondaryEmailId,
       instantMeetingScheduleId: _instantMeetingScheduleId,
@@ -203,15 +208,6 @@ export const duplicateHandler = async ({ ctx, input }: DuplicateOptions) => {
       });
     }
 
-    if (workflows.length > 0) {
-      const relationCreateData = workflows.map((workflow) => {
-        return { eventTypeId: newEventType.id, workflowId: workflow.workflowId };
-      });
-
-      await prisma.workflowsOnEventTypes.createMany({
-        data: relationCreateData,
-      });
-    }
     if (destinationCalendar) {
       await setDestinationCalendarHandler({
         ctx,

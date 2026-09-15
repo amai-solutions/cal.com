@@ -33,7 +33,8 @@ type UsernameStatus = {
 
 export type CustomNextApiHandler = (
   body: Record<string, string>,
-  usernameStatus: UsernameStatus
+  usernameStatus: UsernameStatus,
+  query?: Record<string, string>
 ) => Promise<NextResponse<any>>;
 
 export async function isBlacklisted(username: string) {
@@ -56,11 +57,12 @@ export const isPremiumUserName = IS_PREMIUM_USERNAME_ENABLED
 
 export const generateUsernameSuggestion = async (users: string[], username: string) => {
   const limit = username.length < 2 ? 9999 : 999;
+  const suffix = (value: number) => String(value).padStart(3, "0");
   let rand = 1;
-  while (users.includes(username + String(rand).padStart(4 - rand.toString().length, "0"))) {
+  while (users.includes(username + suffix(rand))) {
     rand = Math.ceil(1 + Math.random() * (limit - 1));
   }
-  return username + String(rand).padStart(4 - rand.toString().length, "0");
+  return username + suffix(rand);
 };
 
 const processResult = (
@@ -85,27 +87,28 @@ const processResult = (
   }
 };
 
-const usernameHandler = (handler: CustomNextApiHandler) => async (body: Record<string, string>) => {
-  const username = slugify(body.username);
-  const check = await usernameCheckForSignup({ username, email: body.email });
+const usernameHandler =
+  (handler: CustomNextApiHandler) => async (body: Record<string, string>, query: Record<string, string>) => {
+    const username = slugify(body.username);
+    const check = await usernameCheckForSignup({ username, email: body.email });
 
-  let result: Parameters<typeof processResult>[0] = "ok";
-  if (check.premium) result = "is_premium";
-  if (!check.available) result = "username_exists";
+    let result: Parameters<typeof processResult>[0] = "ok";
+    if (check.premium) result = "is_premium";
+    if (!check.available) result = "username_exists";
 
-  const { statusCode, message } = processResult(result);
-  const usernameStatus = {
-    statusCode,
-    requestedUserName: username,
-    json: {
-      available: result !== "username_exists",
-      premium: result === "is_premium",
-      message,
-      suggestion: check.suggestedUsername,
-    },
+    const { statusCode, message } = processResult(result);
+    const usernameStatus = {
+      statusCode,
+      requestedUserName: username,
+      json: {
+        available: result !== "username_exists",
+        premium: result === "is_premium",
+        message,
+        suggestion: check.suggestedUsername,
+      },
+    };
+    return handler(body, usernameStatus, query);
   };
-  return handler(body, usernameStatus);
-};
 
 const usernameCheck = async (usernameRaw: string, currentOrgDomain?: string | null) => {
   log.debug("usernameCheck", { usernameRaw, currentOrgDomain });
@@ -124,10 +127,7 @@ const usernameCheck = async (usernameRaw: string, currentOrgDomain?: string | nu
     const organization = await prisma.team.findFirst({
       where: {
         isOrganization: true,
-        OR: [
-          { slug: currentOrgDomain },
-          { metadata: { path: ["requestedSlug"], equals: currentOrgDomain } },
-        ],
+        OR: [{ slug: currentOrgDomain }, { metadata: { path: ["requestedSlug"], equals: currentOrgDomain } }],
       },
       select: {
         id: true,

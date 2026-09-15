@@ -1,19 +1,18 @@
 import dayjs from "@calcom/dayjs";
 import { handleWebhookTrigger } from "@calcom/features/bookings/lib/handleWebhookTrigger";
-import { CreditService } from "@calcom/features/ee/billing/credit-service";
-import { WorkflowService } from "@calcom/features/ee/workflows/lib/service/WorkflowService";
 import type { EventPayloadType } from "@calcom/features/webhooks/lib/sendPayload";
 import { ErrorCode } from "@calcom/lib/errorCodes";
 import { HttpError } from "@calcom/lib/http-error";
 import prisma from "@calcom/prisma";
 import { BookingStatus } from "@calcom/prisma/enums";
-
 import { createLoggerWithEventDetails } from "../handleNewBooking/logger";
 import createNewSeat from "./create/createNewSeat";
 import rescheduleSeatedBooking from "./reschedule/rescheduleSeatedBooking";
-import type { NewSeatedBookingObject, SeatedBooking, HandleSeatsResultBooking } from "./types";
+import type { HandleSeatsResultBooking, NewSeatedBookingObject, SeatedBooking } from "./types";
 
-const handleSeats = async (newSeatedBookingObject: NewSeatedBookingObject) => {
+const handleSeats = async (
+  newSeatedBookingObject: NewSeatedBookingObject
+) => {
   const {
     eventType,
     reqBodyUser,
@@ -30,10 +29,9 @@ const handleSeats = async (newSeatedBookingObject: NewSeatedBookingObject) => {
     subscriberOptions,
     eventTrigger,
     evt,
-    workflows,
     rescheduledBy,
-    rescheduleReason,
     isDryRun = false,
+    fullName,
     traceContext,
   } = newSeatedBookingObject;
   // TODO: We could allow doing more things to support good dry run for seats
@@ -102,44 +100,12 @@ const handleSeats = async (newSeatedBookingObject: NewSeatedBookingObject) => {
     resultBooking = await createNewSeat(newSeatedBookingObject, seatedBooking, reqBodyMetadata);
   }
 
-  // If the resultBooking is defined we should trigger workflows else, trigger in handleNewBooking
+  // If the resultBooking is defined we should trigger webhooks else, trigger in handleNewBooking
   if (resultBooking) {
     const metadata = {
       ...(typeof resultBooking.metadata === "object" && resultBooking.metadata),
       ...reqBodyMetadata,
     };
-    // For seated events, use the phone number from the specific attendee being added
-    const attendeePhoneNumber = invitee[0]?.phoneNumber || smsReminderNumber || null;
-    try {
-      const creditService = new CreditService();
-
-      await WorkflowService.scheduleWorkflowsForNewBooking({
-        workflows: workflows,
-        smsReminderNumber: attendeePhoneNumber,
-        calendarEvent: {
-          ...evt,
-          uid: seatedBooking.uid,
-          rescheduleReason,
-          ...{
-            metadata,
-            eventType: {
-              slug: eventType.slug,
-              schedulingType: eventType.schedulingType,
-              hosts: eventType.hosts,
-            },
-          },
-        },
-        emailAttendeeSendToOverride: bookerEmail,
-        seatReferenceUid: resultBooking?.seatReferenceUid,
-        isDryRun,
-        isConfirmedByDefault: !evt.requiresConfirmation,
-        isRescheduleEvent: !!rescheduleUid,
-        isNormalBookingOrFirstRecurringSlot: true,
-        creditCheckFn: creditService.hasAvailableCredits.bind(creditService),
-      });
-    } catch (error) {
-      loggerWithEventDetails.error("Error while scheduling workflow reminders", JSON.stringify({ error }));
-    }
 
     const webhookData: EventPayloadType = {
       ...evt,
@@ -157,7 +123,7 @@ const handleSeats = async (newSeatedBookingObject: NewSeatedBookingObject) => {
       metadata,
       eventTypeId,
       status: "ACCEPTED",
-      smsReminderNumber: attendeePhoneNumber || undefined,
+      smsReminderNumber: invitee[0]?.phoneNumber || smsReminderNumber || undefined,
       rescheduledBy,
     };
 

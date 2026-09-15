@@ -1,14 +1,11 @@
-import type { NextApiRequest, NextApiResponse } from "next";
-import type Stripe from "stripe";
-
 import { getPremiumMonthlyPlanPriceId } from "@calcom/app-store/stripepayment/lib/utils";
 import { getServerSession } from "@calcom/features/auth/lib/getServerSession";
-import { checkPremiumUsername } from "@calcom/features/ee/common/lib/checkPremiumUsername";
 import { WEBAPP_URL } from "@calcom/lib/constants";
-import { getTrackingFromCookies } from "@calcom/lib/tracking";
+import { usernameCheck } from "@calcom/lib/server/username";
 import prisma from "@calcom/prisma";
 import type { Prisma } from "@calcom/prisma/client";
-
+import type { NextApiRequest, NextApiResponse } from "next";
+import type Stripe from "stripe";
 import { getStripeCustomerIdFromUserId } from "../lib/customer";
 import stripe from "../lib/server";
 
@@ -40,8 +37,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return;
     }
 
-    const tracking = getTrackingFromCookies(req.cookies);
-
     const return_url = `${WEBAPP_URL}/api/integrations/stripepayment/paymentCallback?checkoutSessionId={CHECKOUT_SESSION_ID}&callbackUrl=${callbackUrl}`;
     const createSessionParams: Stripe.Checkout.SessionCreateParams = {
       mode: "subscription",
@@ -58,12 +53,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       metadata: {
         userId: userId.toString(),
         intentUsername,
-        ...(tracking?.googleAds?.gclid && { gclid: tracking.googleAds.gclid, campaignId: tracking.googleAds.campaignId }),
-        ...(tracking?.linkedInAds?.liFatId && { liFatId: tracking.linkedInAds.liFatId, linkedInCampaignId: tracking.linkedInAds?.campaignId }),
       },
     };
 
-    const checkPremiumResult = await checkPremiumUsername(intentUsername);
+    const checkPremiumResult = await usernameCheck(intentUsername);
     if (!checkPremiumResult.available) {
       return res.status(404).json({ message: "Intent username not available" });
     }
@@ -90,7 +83,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       });
     }
     const checkoutSession = await stripe.checkout.sessions.create(createSessionParams);
-    if (checkoutSession && checkoutSession.url) {
+    if (checkoutSession?.url) {
       return res.redirect(checkoutSession.url).end();
     }
     return res.status(404).json({ message: "Couldn't redirect to stripe checkout session" });

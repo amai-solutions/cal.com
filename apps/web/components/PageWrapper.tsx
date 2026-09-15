@@ -1,9 +1,9 @@
 /**
  * PAGES ROUTER ONLY - Used exclusively by Next.js Pages Router
- * 
+ *
  * Currently only serves the /router endpoint (routing forms redirect page).
  * DO NOT add new features here - this file will be deprecated once we remove apps/web/pages.
- * 
+ *
  * For App Router, use PageWrapperAppDir.tsx instead.
  */
 
@@ -16,7 +16,6 @@ import Head from "next/head";
 import Script from "next/script";
 
 import "@calcom/embed-core/src/embed-iframe";
-import LicenseRequired from "@calcom/features/ee/common/components/LicenseRequired";
 import { IS_CALCOM, WEBAPP_URL } from "@calcom/lib/constants";
 import { getCalcomUrl } from "@calcom/lib/getCalcomUrl";
 import { buildCanonical } from "@calcom/lib/next-seo.config";
@@ -84,12 +83,13 @@ function PageWrapper(props: AppProps) {
         // It is strictly not necessary to disable, but in a future update of react/no-danger this will error.
         // And we don't want it to error here anyways
         // eslint-disable-next-line react/no-danger
+        // biome-ignore lint/security/noDangerouslySetInnerHtml: Setting page status requires inline script
         dangerouslySetInnerHTML={{ __html: `window.CalComPageStatus = '${pageStatus}'` }}
       />
 
       <style jsx global>{`
         :root {
-          --font-sans: ${interFont.style.fontFamily};
+          --font-sans: ${interFont.style.fontFamily}, system-ui;
           --font-cal: ${calFont.style.fontFamily};
         }
       `}</style>
@@ -97,9 +97,9 @@ function PageWrapper(props: AppProps) {
 
       {getLayout(
         Component.requiresLicense ? (
-          <LicenseRequired>
+          <>
             <Component {...pageProps} err={err} />
-          </LicenseRequired>
+          </>
         ) : (
           <Component {...pageProps} err={err} />
         )

@@ -1,14 +1,9 @@
-import { useState } from "react";
-import type { z } from "zod";
-
-import { MeetingSessionDetailsDialog } from "@calcom/features/ee/video/MeetingSessionDetailsDialog";
-import ViewRecordingsDialog from "@calcom/features/ee/video/ViewRecordingsDialog";
 import { useLocale } from "@calcom/lib/hooks/useLocale";
 import type { bookingMetadataSchema } from "@calcom/prisma/zod-utils";
 import { trpc } from "@calcom/trpc/react";
 import classNames from "@calcom/ui/classNames";
 import { Button } from "@calcom/ui/components/button";
-import { Dialog, DialogContent, DialogFooter, DialogClose } from "@calcom/ui/components/dialog";
+import { Dialog, DialogClose, DialogContent, DialogFooter } from "@calcom/ui/components/dialog";
 import {
   Dropdown,
   DropdownItem,
@@ -21,7 +16,7 @@ import {
 } from "@calcom/ui/components/dropdown";
 import type { ActionType } from "@calcom/ui/components/table";
 import { showToast } from "@calcom/ui/components/toast";
-
+import { Tooltip } from "@calcom/ui/components/tooltip";
 import { AddGuestsDialog } from "@components/dialog/AddGuestsDialog";
 import { CancelBookingDialog } from "@components/dialog/CancelBookingDialog";
 import { ChargeCardDialog } from "@components/dialog/ChargeCardDialog";
@@ -29,21 +24,22 @@ import { EditLocationDialog } from "@components/dialog/EditLocationDialog";
 import { ReassignDialog } from "@components/dialog/ReassignDialog";
 import { RejectionReasonDialog } from "@components/dialog/RejectionReasonDialog";
 import { ReportBookingDialog } from "@components/dialog/ReportBookingDialog";
-import { RerouteDialog } from "@components/dialog/RerouteDialog";
 import { RescheduleDialog } from "@components/dialog/RescheduleDialog";
-
+import { WrongAssignmentDialog } from "@components/dialog/WrongAssignmentDialog";
+import { useState } from "react";
+import type { z } from "zod";
 import { useBookingConfirmation } from "../hooks/useBookingConfirmation";
 import type { BookingItemProps } from "../types";
 import { useBookingActionsStoreContext } from "./BookingActionsStoreProvider";
 import {
+  type BookingActionContext,
+  getAfterEventActions,
   getCancelEventAction,
   getEditEventActions,
-  getAfterEventActions,
+  getPendingActions,
   getReportAction,
   shouldShowEditActions,
   shouldShowPendingActions,
-  getPendingActions,
-  type BookingActionContext,
 } from "./bookingActions";
 
 interface BookingActionsDropdownProps {
@@ -118,8 +114,12 @@ export function BookingActionsDropdown({
   const setIsOpenAddGuestsDialog = useBookingActionsStoreContext((state) => state.setIsOpenAddGuestsDialog);
   const isOpenReportDialog = useBookingActionsStoreContext((state) => state.isOpenReportDialog);
   const setIsOpenReportDialog = useBookingActionsStoreContext((state) => state.setIsOpenReportDialog);
-  const rerouteDialogIsOpen = useBookingActionsStoreContext((state) => state.rerouteDialogIsOpen);
-  const setRerouteDialogIsOpen = useBookingActionsStoreContext((state) => state.setRerouteDialogIsOpen);
+  const isOpenWrongAssignmentDialog = useBookingActionsStoreContext(
+    (state) => state.isOpenWrongAssignmentDialog
+  );
+  const setIsOpenWrongAssignmentDialog = useBookingActionsStoreContext(
+    (state) => state.setIsOpenWrongAssignmentDialog
+  );
   const isCancelDialogOpen = useBookingActionsStoreContext((state) => state.isCancelDialogOpen);
   const setIsCancelDialogOpen = useBookingActionsStoreContext((state) => state.setIsCancelDialogOpen);
 
@@ -178,7 +178,6 @@ export function BookingActionsDropdown({
     return "upcoming";
   };
 
-  const isBookingFromRoutingForm = !!booking.routedFromRoutingFormReponse && !!booking.eventType?.team;
 
   const userEmail = booking.loggedInUser.userEmail;
   const userSeat = booking.seatsReferences.find((seat) => !!userEmail && seat.attendee?.email === userEmail);
@@ -234,7 +233,6 @@ export function BookingActionsDropdown({
     isRecurring,
     isTabRecurring,
     isTabUnconfirmed,
-    isBookingFromRoutingForm,
     isDisabledCancelling,
     isDisabledRescheduling,
     isCalVideoLocation,
@@ -247,6 +245,7 @@ export function BookingActionsDropdown({
   } as BookingActionContext;
 
   const cancelEventAction = getCancelEventAction(actionContext);
+  const showPastBookingCancelTooltip = isBookingInPast && cancelEventAction.disabled;
 
   // Get pending actions (accept/reject) - only for details context
   const shouldShowPending = shouldShowPendingActions(actionContext);
@@ -264,8 +263,8 @@ export function BookingActionsDropdown({
               recurringEventId: booking.recurringEventId,
             })
         : action.id === "reject"
-        ? () => handleReject()
-        : undefined,
+          ? () => handleReject()
+          : undefined,
   })) as ActionType[];
 
   const shouldShowEdit = shouldShowEditActions(actionContext);
@@ -276,15 +275,13 @@ export function BookingActionsDropdown({
     onClick:
       action.id === "reschedule_request"
         ? () => setIsOpenRescheduleDialog(true)
-        : action.id === "reroute"
-        ? () => setRerouteDialogIsOpen(true)
         : action.id === "change_location"
-        ? () => setIsOpenLocationDialog(true)
-        : action.id === "add_members"
-        ? () => setIsOpenAddGuestsDialog(true)
-        : action.id === "reassign"
-        ? () => setIsOpenReassignDialog(true)
-        : undefined,
+            ? () => setIsOpenLocationDialog(true)
+            : action.id === "add_members"
+              ? () => setIsOpenAddGuestsDialog(true)
+              : action.id === "reassign"
+                ? () => setIsOpenReassignDialog(true)
+                : undefined,
   })) as ActionType[];
 
   const baseAfterEventActions = getAfterEventActions(actionContext);
@@ -294,22 +291,22 @@ export function BookingActionsDropdown({
       action.id === "view_recordings"
         ? () => setViewRecordingsDialogIsOpen(true)
         : action.id === "meeting_session_details"
-        ? () => setMeetingSessionDetailsDialogIsOpen(true)
-        : action.id === "charge_card"
-        ? () => setChargeCardDialogIsOpen(true)
-        : action.id === "no_show"
-        ? () => {
-            if (attendeeList.length === 1) {
-              const attendee = attendeeList[0];
-              noShowMutation.mutate({
-                bookingUid: booking.uid,
-                attendees: [{ email: attendee.email, noShow: !attendee.noShow }],
-              });
-              return;
-            }
-            setIsNoShowDialogOpen(true);
-          }
-        : undefined,
+          ? () => setMeetingSessionDetailsDialogIsOpen(true)
+          : action.id === "charge_card"
+            ? () => setChargeCardDialogIsOpen(true)
+            : action.id === "no_show"
+              ? () => {
+                  if (attendeeList.length === 1) {
+                    const attendee = attendeeList[0];
+                    noShowMutation.mutate({
+                      bookingUid: booking.uid,
+                      attendees: [{ email: attendee.email, noShow: !attendee.noShow }],
+                    });
+                    return;
+                  }
+                  setIsNoShowDialogOpen(true);
+                }
+              : undefined,
     disabled:
       action.disabled ||
       (action.id === "no_show" && !(isBookingInPast || isOngoing)) ||
@@ -417,7 +414,6 @@ export function BookingActionsDropdown({
           setIsOpenDialog={setIsOpenReassignDialog}
           bookingId={booking.id}
           teamId={booking.eventType?.team?.id || 0}
-          bookingFromRoutingForm={isBookingFromRoutingForm}
           isManagedEvent={booking.eventType?.parentId != null}
         />
       )}
@@ -449,22 +445,7 @@ export function BookingActionsDropdown({
           paymentCurrency={booking.payment[0].currency}
         />
       )}
-      {isCalVideoLocation && (
-        <ViewRecordingsDialog
-          booking={booking}
-          isOpenDialog={viewRecordingsDialogIsOpen}
-          setIsOpenDialog={setViewRecordingsDialogIsOpen}
-          timeFormat={booking.loggedInUser.userTimeFormat ?? null}
-        />
-      )}
-      {isCalVideoLocation && meetingSessionDetailsDialogIsOpen && (
-        <MeetingSessionDetailsDialog
-          booking={booking}
-          isOpenDialog={meetingSessionDetailsDialogIsOpen}
-          setIsOpenDialog={setMeetingSessionDetailsDialogIsOpen}
-          timeFormat={booking.loggedInUser.userTimeFormat ?? null}
-        />
-      )}
+      {/* Cal video recording dialogs removed (enterprise) */}
       {isNoShowDialogOpen && (
         <NoShowAttendeesDialog
           bookingUid={booking.uid}
@@ -506,30 +487,6 @@ export function BookingActionsDropdown({
         internalNotePresets={[]}
         eventTypeMetadata={booking.eventType?.metadata}
       />
-      {isBookingFromRoutingForm &&
-        parsedBooking.eventType &&
-        parsedBooking.eventType.id !== undefined &&
-        parsedBooking.eventType.slug !== undefined &&
-        parsedBooking.eventType.title !== undefined &&
-        parsedBooking.routedFromRoutingFormReponse && (
-          <RerouteDialog
-            isOpenDialog={rerouteDialogIsOpen}
-            setIsOpenDialog={setRerouteDialogIsOpen}
-            booking={{
-              ...parsedBooking,
-              metadata: parsedBooking.metadata as z.infer<typeof bookingMetadataSchema>,
-              routedFromRoutingFormReponse: parsedBooking.routedFromRoutingFormReponse,
-              eventType: {
-                length: parsedBooking.eventType.length ?? 0,
-                schedulingType: parsedBooking.eventType.schedulingType ?? null,
-                title: parsedBooking.eventType.title,
-                id: parsedBooking.eventType.id,
-                slug: parsedBooking.eventType.slug,
-                team: parsedBooking.eventType.team ?? null,
-              },
-            }}
-          />
-        )}
     </>
   );
 
@@ -685,25 +642,30 @@ export function BookingActionsDropdown({
               </DropdownMenuItem>
             </>
             <DropdownMenuSeparator />
-            <DropdownMenuItem
-              className="rounded-lg"
-              key={cancelEventAction.id}
-              disabled={cancelEventAction.disabled}>
-              <DropdownItem
-                type="button"
-                color={cancelEventAction.color}
-                StartIcon={cancelEventAction.icon}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setIsCancelDialogOpen(true);
-                }}
-                disabled={cancelEventAction.disabled}
-                data-booking-uid={cancelEventAction.bookingUid}
-                data-testid={cancelEventAction.id}
-                className={cancelEventAction.disabled ? "text-muted" : undefined}>
-                {cancelEventAction.label}
-              </DropdownItem>
-            </DropdownMenuItem>
+            <Tooltip
+              content={isBookingInPast ? t("cannot_cancel_past_booking") : ""}
+              side="left"
+              open={showPastBookingCancelTooltip ? undefined : false}>
+              <DropdownMenuItem
+                className="rounded-lg"
+                key={cancelEventAction.id}
+                disabled={cancelEventAction.disabled}>
+                <DropdownItem
+                  type="button"
+                  color={cancelEventAction.color}
+                  StartIcon={cancelEventAction.icon}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsCancelDialogOpen(true);
+                  }}
+                  disabled={cancelEventAction.disabled}
+                  data-booking-uid={cancelEventAction.bookingUid}
+                  data-testid={cancelEventAction.id}
+                  className={cancelEventAction.disabled ? "text-muted" : undefined}>
+                  {cancelEventAction.label}
+                </DropdownItem>
+              </DropdownMenuItem>
+            </Tooltip>
           </DropdownMenuContent>
         </ConditionalPortal>
       </Dropdown>

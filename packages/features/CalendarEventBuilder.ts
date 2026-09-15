@@ -1,27 +1,37 @@
-import type { TFunction } from "i18next";
-
+import process from "node:process";
+import { ALL_APPS } from "@calcom/app-store/utils";
+import { getAssignmentReasonCategory } from "@calcom/features/bookings/lib/getAssignmentReasonCategory";
 import { getCalEventResponses } from "@calcom/features/bookings/lib/getCalEventResponses";
 import type { BookingRepository } from "@calcom/features/bookings/repositories/BookingRepository";
-import { getBookerBaseUrl } from "@calcom/features/ee/organizations/lib/getBookerUrlServer";
+import {
+  type EventTypeBrandingData,
+  getEventTypeService,
+} from "@calcom/features/eventtypes/di/EventTypeService.container";
+import { getTranslation } from "@calcom/i18n/server";
 import { parseRecurringEvent } from "@calcom/lib/isRecurringEvent";
-import { getTranslation } from "@calcom/lib/server/i18n";
-import { getTimeFormatStringFromUserTimeFormat, type TimeFormat } from "@calcom/lib/timeFormat";
-import type { Attendee, BookingSeat, DestinationCalendar, Prisma, User } from "@calcom/prisma/client";
-import { SchedulingType } from "@calcom/prisma/enums";
+import { getTimeFormatStringFromUserTimeFormat } from "@calcom/lib/timeFormat";
+import type {
+  Attendee,
+  BookingReference,
+  BookingSeat,
+  DestinationCalendar,
+  Prisma,
+  User,
+} from "@calcom/prisma/client";
+import type { SchedulingType } from "@calcom/prisma/enums";
 import { bookingResponses as bookingResponsesSchema } from "@calcom/prisma/zod-utils";
-import type { CalendarEvent, Person, CalEventResponses, AppsStatus } from "@calcom/types/Calendar";
+import type { AppsStatus, CalEventResponses, CalendarEvent, Person } from "@calcom/types/Calendar";
 import type { VideoCallData } from "@calcom/types/VideoApiAdapter";
+import type { TFunction } from "i18next";
 
-export type BookingForCalEventBuilder = NonNullable<
-  Awaited<ReturnType<BookingRepository["getBookingForCalEventBuilder"]>>
+const getBookerBaseUrl = async (_orgSlug?: string | number | null): Promise<string> =>
+  process.env.NEXT_PUBLIC_WEBAPP_URL || "https://app.cal.com";
+
+type CalendarEventRequiredFields = Required<
+  Pick<CalendarEvent, "startTime" | "endTime" | "type" | "bookerUrl" | "title" | "organizer" | "attendees">
 >;
-export type BookingMetaOptions = {
-  conferenceCredentialId?: number;
-  platformClientId?: string;
-  platformRescheduleUrl?: string;
-  platformCancelUrl?: string;
-  platformBookingUrl?: string;
-};
+type CalendarEventBuilderInit = CalendarEventRequiredFields & Partial<CalendarEvent>;
+const APP_TYPE_TO_NAME_MAP = new Map<string, string>(ALL_APPS.map((app) => [app.type, app.name]));
 
 async function _buildPersonFromUser(
   user: Pick<User, "id" | "name" | "locale" | "username" | "email" | "timeFormat" | "timeZone">
@@ -58,14 +68,26 @@ async function _buildPersonFromAttendee(
   } satisfies Person;
 }
 
-export class CalendarEventBuilder {
-  private event: Partial<CalendarEvent>;
+export type BuiltCalendarEvent = Omit<CalendarEvent, "bookerUrl"> & { bookerUrl: string };
+export type BookingForCalEventBuilder = NonNullable<
+  Awaited<ReturnType<BookingRepository["getBookingForCalEventBuilder"]>>
+>;
+export type BookingMetaOptions = {
+  conferenceCredentialId?: number;
+  platformClientId?: string;
+  platformRescheduleUrl?: string;
+  platformCancelUrl?: string;
+  platformBookingUrl?: string;
+};
 
-  constructor(existingEvent?: Partial<CalendarEvent>) {
-    this.event = existingEvent || {};
+export class CalendarEventBuilder {
+  private event: CalendarEventBuilderInit;
+
+  constructor(existingEvent: CalendarEventBuilderInit) {
+    this.event = existingEvent;
   }
 
-  static fromEvent(event: Partial<CalendarEvent>) {
+  static fromEvent(event: CalendarEventBuilderInit) {
     return new CalendarEventBuilder(event);
   }
 
@@ -81,7 +103,6 @@ export class CalendarEventBuilder {
     if (!user) throw new Error(`Booking ${uid} is missing an organizer — user may have been deleted.`);
     if (!eventType) throw new Error(`Booking ${uid} is missing eventType — it may have been deleted.`);
 
-    const builder = new CalendarEventBuilder();
     const {
       description,
       attendees,
@@ -96,6 +117,7 @@ export class CalendarEventBuilder {
       iCalSequence,
       oneTimePassword,
       seatsReferences,
+      assignmentReason,
     } = booking;
 
     const {
@@ -138,18 +160,21 @@ export class CalendarEventBuilder {
 
     const recurring = parseRecurringEvent(eventType.recurringEvent) ?? undefined;
 
+    const builder = new CalendarEventBuilder({
+      bookerUrl,
+      title,
+      startTime: startTime.toISOString(),
+      endTime: endTime.toISOString(),
+      type: eventType.slug,
+      organizer: organizerPerson,
+      attendees: attendeesList,
+      additionalNotes,
+    });
+
     // Base builder setup
     builder
-      .withBasicDetails({
-        bookerUrl,
-        title,
-        startTime: startTime.toISOString(),
-        endTime: endTime.toISOString(),
-        additionalNotes,
-      })
       .withEventType({
         id: eventType.id,
-        slug: eventType.slug,
         description: eventType.description,
         hideCalendarNotes: eventType.hideCalendarNotes,
         hideCalendarEventDetails: eventType.hideCalendarEventDetails,
@@ -162,8 +187,6 @@ export class CalendarEventBuilder {
         disableRescheduling: eventType.disableRescheduling ?? false,
         disableCancelling: eventType.disableCancelling ?? false,
       })
-      .withOrganizer(organizerPerson)
-      .withAttendees(attendeesList)
       .withMetadataAndResponses({
         additionalNotes,
         customInputs: parsedCustomInputs,
@@ -185,7 +208,27 @@ export class CalendarEventBuilder {
       .withRecurring(recurring)
       .withUid(uid)
       .withOneTimePassword(oneTimePassword)
-      .withOrganization(organizationId);
+      .withOrganization(organizationId)
+      .withAssignmentReason(
+        assignmentReason?.[0]?.reasonEnum
+          ? {
+              category: getAssignmentReasonCategory(assignmentReason[0].reasonEnum),
+              details: assignmentReason[0].reasonString ?? null,
+            }
+          : null
+      )
+      .withHideBranding(
+        await getEventTypeService().shouldHideBrandingForEventType(eventType.id, {
+          team: eventType.team
+            ? { hideBranding: eventType.team.hideBranding, parent: eventType.team.parent }
+            : null,
+          owner: {
+            id: user.id,
+            hideBranding: user.hideBranding,
+            profiles: user.profiles ?? [],
+          },
+        } satisfies EventTypeBrandingData)
+      );
 
     // Seats
     if (seatsReferences?.length && bookingResponses) {
@@ -199,7 +242,7 @@ export class CalendarEventBuilder {
     }
 
     // Video
-    if (videoCallData && videoCallData.url) {
+    if (videoCallData?.url) {
       builder.withVideoCallData({
         ...videoCallData,
         id: videoCallData.id ?? "",
@@ -209,10 +252,11 @@ export class CalendarEventBuilder {
     }
 
     references
-      .filter((r) => r && r.type)
+      .filter((r) => r?.type)
       .forEach((ref) => {
+        const appName = APP_TYPE_TO_NAME_MAP.get(ref.type) || ref.type.replace("_", "-");
         appsStatus.push({
-          appName: ref.type.replace("_", "-"),
+          appName,
           type: ref.type,
           success: ref.uid ? 1 : 0,
           failures: ref.uid ? 0 : 1,
@@ -234,9 +278,7 @@ export class CalendarEventBuilder {
         bookingAttendees.some((attendee) => attendee.email === host.user.email)
       );
 
-      const hostsWithoutOrganizerData = hostsToInclude.filter(
-        (host) => host.user.email !== user.email
-      );
+      const hostsWithoutOrganizerData = hostsToInclude.filter((host) => host.user.email !== user.email);
 
       const hostsWithoutOrganizer = await Promise.all(
         hostsWithoutOrganizerData.map((host) => _buildPersonFromUser(host.user))
@@ -262,32 +304,7 @@ export class CalendarEventBuilder {
     return builder;
   }
 
-  withBasicDetails({
-    bookerUrl,
-    title,
-    startTime,
-    endTime,
-    additionalNotes,
-  }: {
-    bookerUrl: string;
-    title: string;
-    startTime: string;
-    endTime: string;
-    additionalNotes?: string;
-  }) {
-    this.event = {
-      ...this.event,
-      bookerUrl,
-      title,
-      startTime,
-      endTime,
-      additionalNotes,
-    };
-    return this;
-  }
-
   withEventType(eventType: {
-    slug: string;
     description?: string | null;
     id: number;
     hideCalendarNotes?: boolean;
@@ -303,7 +320,6 @@ export class CalendarEventBuilder {
   }) {
     this.event = {
       ...this.event,
-      type: eventType.slug,
       description: eventType.description,
       eventTypeId: eventType.id,
       hideCalendarNotes: eventType.hideCalendarNotes,
@@ -317,43 +333,6 @@ export class CalendarEventBuilder {
       customReplyToEmail: eventType.customReplyToEmail,
       disableRescheduling: eventType.disableRescheduling ?? false,
       disableCancelling: eventType.disableCancelling ?? false,
-    };
-    return this;
-  }
-
-  withOrganizer(organizer: {
-    id: number;
-    name: string | null;
-    email: string;
-    username?: string;
-    usernameInOrg?: string;
-    timeZone: string;
-    timeFormat?: TimeFormat;
-    language: {
-      translate: TFunction;
-      locale: string;
-    };
-  }) {
-    this.event = {
-      ...this.event,
-      organizer: {
-        id: organizer.id,
-        name: organizer.name || "Nameless",
-        email: organizer.email,
-        username: organizer.username,
-        usernameInOrg: organizer.usernameInOrg,
-        timeZone: organizer.timeZone,
-        language: organizer.language,
-        timeFormat: organizer.timeFormat,
-      },
-    };
-    return this;
-  }
-
-  withAttendees(attendees: Person[]) {
-    this.event = {
-      ...this.event,
-      attendees,
     };
     return this;
   }
@@ -464,6 +443,9 @@ export class CalendarEventBuilder {
   }
 
   withTeam(team?: { name: string; members: Person[]; id: number }) {
+    if (!team) {
+      return this;
+    }
     this.event = {
       ...this.event,
       team,
@@ -495,7 +477,10 @@ export class CalendarEventBuilder {
     return this;
   }
 
-  withRecurringEventId(recurringEventId: string) {
+  withRecurringEventId(recurringEventId?: string | null) {
+    if (!recurringEventId) {
+      return this;
+    }
     this.event = {
       ...this.event,
       existingRecurringEvent: {
@@ -529,18 +514,40 @@ export class CalendarEventBuilder {
     return this;
   }
 
-  build(): CalendarEvent | null {
-    // Validate required fields
-    if (
-      !this.event.startTime ||
-      !this.event.endTime ||
-      !this.event.type ||
-      !this.event.bookerUrl ||
-      !this.event.title
-    ) {
-      return null;
-    }
+  withAssignmentReason(assignmentReason?: { category: string; details?: string | null } | null) {
+    this.event = {
+      ...this.event,
+      assignmentReason,
+    };
+    return this;
+  }
 
-    return this.event as CalendarEvent;
+  withHideBranding(hideBranding?: boolean) {
+    this.event = {
+      ...this.event,
+      hideBranding,
+    };
+    return this;
+  }
+
+  withVideoCallDataFromReferences(bookingReferences: BookingReference[]): this {
+    const videoCallReference = bookingReferences.find((reference) => reference.type.includes("_video"));
+
+    if (videoCallReference) {
+      this.event = {
+        ...this.event,
+        videoCallData: {
+          type: videoCallReference.type,
+          id: videoCallReference.meetingId,
+          password: videoCallReference?.meetingPassword,
+          url: videoCallReference.meetingUrl,
+        },
+      };
+    }
+    return this;
+  }
+
+  build(): BuiltCalendarEvent {
+    return this.event;
   }
 }

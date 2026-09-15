@@ -40,6 +40,7 @@ import { Tooltip } from "@calcom/ui/components/tooltip";
 
 import assignmentReasonBadgeTitleMap from "@lib/booking/assignmentReasonBadgeTitleMap";
 
+import { WrongAssignmentDialog } from "../dialog/WrongAssignmentDialog";
 import { buildBookingLink } from "../../modules/bookings/lib/buildBookingLink";
 import { useBookingDetailsSheetStore } from "../../modules/bookings/store/bookingDetailsSheetStore";
 import type { BookingAttendee } from "../../modules/bookings/types";
@@ -65,7 +66,6 @@ type TeamEvent = Ensure<NonNullable<ParsedBooking["eventType"]>, "team">;
 type TeamEventBooking = Omit<ParsedBooking, "eventType"> & {
   eventType: TeamEvent;
 };
-type ReroutableBooking = Ensure<TeamEventBooking, "routedFromRoutingFormReponse">;
 
 function buildParsedBooking(booking: BookingItemProps) {
   // The way we fetch bookings there could be eventType object even without an eventType, but id confirms its existence
@@ -86,14 +86,6 @@ function buildParsedBooking(booking: BookingItemProps) {
     metadata: bookingMetadata,
   };
 }
-
-const isBookingReroutable = (booking: ParsedBooking): booking is ReroutableBooking => {
-  // We support only team bookings for now for rerouting
-  // Though `routedFromRoutingFormReponse` could be there for a non-team booking, we don't want to support it for now.
-  // Let's not support re-routing for a booking without an event-type for now.
-  // Such a booking has its event-type deleted and there might not be something to reroute to.
-  return !!booking.routedFromRoutingFormReponse && !!booking.eventType?.team;
-};
 
 const ConditionalLink = ({
   children,
@@ -178,7 +170,6 @@ function BookingListItem(booking: BookingItemProps) {
 
   const isTabRecurring = booking.listingStatus === "recurring";
   const isTabUnconfirmed = booking.listingStatus === "unconfirmed";
-  const isBookingFromRoutingForm = isBookingReroutable(parsedBooking);
 
   const userSeat = booking.seatsReferences.find((seat) => !!userEmail && seat.attendee?.email === userEmail);
 
@@ -223,7 +214,6 @@ function BookingListItem(booking: BookingItemProps) {
     isRecurring,
     isTabRecurring,
     isTabUnconfirmed,
-    isBookingFromRoutingForm,
     isDisabledCancelling,
     isDisabledRescheduling,
     isCalVideoLocation:
@@ -273,7 +263,12 @@ function BookingListItem(booking: BookingItemProps) {
 
   const setIsOpenReportDialog = useBookingActionsStoreContext((state) => state.setIsOpenReportDialog);
   const setIsCancelDialogOpen = useBookingActionsStoreContext((state) => state.setIsCancelDialogOpen);
-
+  const isOpenWrongAssignmentDialog = useBookingActionsStoreContext(
+    (state) => state.isOpenWrongAssignmentDialog
+  );
+  const setIsOpenWrongAssignmentDialog = useBookingActionsStoreContext(
+    (state) => state.setIsOpenWrongAssignmentDialog
+  );
   const reportAction = getReportAction(actionContext);
   const reportActionWithHandler = {
     ...reportAction,
@@ -431,7 +426,40 @@ function BookingListItem(booking: BookingItemProps) {
                   currentEmail={userEmail}
                   bookingUid={booking.uid}
                   isBookingInPast={isBookingInPast}
+                  hideOrganizerEmail={booking.eventType?.hideOrganizerEmail}
+                  organizerEmail={booking.user?.email}
+                  eventTypeHosts={booking.eventType?.hosts}
                 />
+              )}
+              {!isPending && (
+                <div className="sm:hidden">
+                  {(provider?.label ||
+                    (typeof locationToDisplay === "string" && locationToDisplay?.startsWith("https://"))) &&
+                    locationToDisplay.startsWith("http") && (
+                      <a
+                        href={locationToDisplay}
+                        onClick={(e) => e.stopPropagation()}
+                        target="_blank"
+                        title={locationToDisplay}
+                        rel="noreferrer"
+                        className="text-sm leading-6 text-blue-600 hover:underline dark:text-blue-400">
+                        <div className="flex items-center gap-2">
+                          {provider?.iconUrl && (
+                            <img
+                              src={provider.iconUrl}
+                              width={16}
+                              height={16}
+                              className="h-4 w-4 rounded-sm"
+                              alt={`${provider?.label} logo`}
+                            />
+                          )}
+                          {provider?.label
+                            ? t("join_event_location", { eventLocationType: provider?.label })
+                            : t("join_meeting")}
+                        </div>
+                      </a>
+                    )}
+                </div>
               )}
               {isCancelled && booking.rescheduled && (
                 <div className="mt-2 inline-block md:hidden">
@@ -509,6 +537,7 @@ function BookingListItem(booking: BookingItemProps) {
         userTimeFormat={userTimeFormat}
         userTimeZone={userTimeZone}
         isRescheduled={isRescheduled}
+        onAssignmentReasonClick={undefined}
       />
     </div>
   );
@@ -522,6 +551,7 @@ const BookingItemBadges = ({
   userTimeFormat,
   userTimeZone,
   isRescheduled,
+  onAssignmentReasonClick,
 }: {
   booking: BookingItemProps;
   isPending: boolean;
@@ -530,6 +560,7 @@ const BookingItemBadges = ({
   userTimeFormat: number | null | undefined;
   userTimeZone: string | undefined;
   isRescheduled: boolean;
+  onAssignmentReasonClick?: () => void;
 }) => {
   const { t } = useLocale();
 
@@ -547,7 +578,7 @@ const BookingItemBadges = ({
           </Badge>
         </Tooltip>
       )}
-      {isRejected && !isRescheduled && booking.assignmentReason.length === 0 && (
+      {isRejected && !isRescheduled && booking.assignmentReasonSortedByCreatedAt.length === 0 && (
         <Badge variant="gray" className="ltr:mr-2 rtl:ml-2">
           {t("rejected")}
         </Badge>
@@ -557,8 +588,11 @@ const BookingItemBadges = ({
           {booking.eventType.team.name}
         </Badge>
       )}
-      {booking?.assignmentReason.length > 0 && (
-        <AssignmentReasonTooltip assignmentReason={booking.assignmentReason[0]} />
+      {booking?.assignmentReasonSortedByCreatedAt.length > 0 && (
+        <AssignmentReasonTooltip
+          assignmentReason={booking.assignmentReasonSortedByCreatedAt[booking.assignmentReasonSortedByCreatedAt.length - 1]}
+          onClick={onAssignmentReasonClick}
+        />
       )}
       {booking.report && (
         <Tooltip
@@ -686,14 +720,20 @@ interface UserProps {
 const FirstAttendee = ({
   user,
   currentEmail,
+  hideOrganizerEmail,
 }: {
   user: UserProps;
   currentEmail: string | null | undefined;
+  hideOrganizerEmail?: boolean;
 }) => {
   const { t } = useLocale();
-  return user.email === currentEmail ? (
-    <div className="inline-block">{t("you")}</div>
-  ) : (
+  if (user.email === currentEmail) {
+    return <div className="inline-block">{t("you")}</div>;
+  }
+  if (hideOrganizerEmail) {
+    return <span className="inline-block">{user.name || ""}</span>;
+  }
+  return (
     <a
       key={user.email}
       className="hover:text-blue-500"
@@ -709,8 +749,26 @@ type NoShowProps = {
   isBookingInPast: boolean;
 };
 
-const Attendee = (attendeeProps: BookingAttendee & NoShowProps) => {
-  const { email, name, bookingUid, isBookingInPast, noShow, phoneNumber, user } = attendeeProps;
+const Attendee = (
+  attendeeProps: BookingAttendee &
+    NoShowProps & {
+      hideOrganizerEmail?: boolean;
+      organizerEmail?: string | null;
+      eventTypeHosts?: Array<{ user: { email: string } | null }> | null;
+    }
+) => {
+  const {
+    email,
+    name,
+    bookingUid,
+    isBookingInPast,
+    noShow,
+    phoneNumber,
+    user,
+    hideOrganizerEmail,
+    organizerEmail,
+    eventTypeHosts,
+  } = attendeeProps;
   const { t } = useLocale();
 
   const utils = trpc.useUtils();
@@ -728,6 +786,10 @@ const Attendee = (attendeeProps: BookingAttendee & NoShowProps) => {
   });
 
   const displayName = user?.name || name || user?.email || email;
+
+  const isTeamMemberOrHost =
+    email === organizerEmail || eventTypeHosts?.some((host) => host.user?.email === email);
+  const shouldHideEmail = hideOrganizerEmail && isTeamMemberOrHost;
 
   return (
     <Dropdown open={openDropdown} onOpenChange={setOpenDropdown}>
@@ -747,7 +809,7 @@ const Attendee = (attendeeProps: BookingAttendee & NoShowProps) => {
       </DropdownMenuTrigger>
       <DropdownMenuPortal>
         <DropdownMenuContent>
-          {!isSmsCalEmail(email) && (
+          {!isSmsCalEmail(email) && !shouldHideEmail && (
             <DropdownMenuItem className="focus:outline-none">
               <DropdownItem
                 StartIcon="mail"
@@ -767,7 +829,7 @@ const Attendee = (attendeeProps: BookingAttendee & NoShowProps) => {
               onClick={(e) => {
                 e.preventDefault();
                 const isEmailCopied = isSmsCalEmail(email);
-                copyToClipboard(isEmailCopied ? email : phoneNumber ?? "");
+                copyToClipboard(isEmailCopied ? email : (phoneNumber ?? ""));
                 setOpenDropdown(false);
                 showToast(isEmailCopied ? t("email_copied") : t("phone_number_copied"), "success");
               }}>
@@ -993,21 +1055,36 @@ const DisplayAttendees = ({
   currentEmail,
   bookingUid,
   isBookingInPast,
+  hideOrganizerEmail,
+  organizerEmail,
+  eventTypeHosts,
 }: {
   attendees: BookingAttendee[];
   user: UserProps | null;
   currentEmail?: string | null;
   bookingUid: string;
   isBookingInPast: boolean;
+  hideOrganizerEmail?: boolean;
+  organizerEmail?: string | null;
+  eventTypeHosts?: Array<{ user: { email: string } | null }> | null;
 }) => {
   const { t } = useLocale();
   attendees.sort((a, b) => a.id - b.id);
 
   return (
     <div className="text-emphasis text-sm" onClick={(e) => e.stopPropagation()}>
-      {user && <FirstAttendee user={user} currentEmail={currentEmail} />}
+      {user && (
+        <FirstAttendee user={user} currentEmail={currentEmail} hideOrganizerEmail={hideOrganizerEmail} />
+      )}
       {attendees.length > 1 ? <span>,&nbsp;</span> : <span>&nbsp;{t("and")}&nbsp;</span>}
-      <Attendee {...attendees[0]} bookingUid={bookingUid} isBookingInPast={isBookingInPast} />
+      <Attendee
+        {...attendees[0]}
+        bookingUid={bookingUid}
+        isBookingInPast={isBookingInPast}
+        hideOrganizerEmail={hideOrganizerEmail}
+        organizerEmail={organizerEmail}
+        eventTypeHosts={eventTypeHosts}
+      />
       {attendees.length > 1 && (
         <>
           <div className="text-emphasis inline-block text-sm">&nbsp;{t("and")}&nbsp;</div>
@@ -1015,7 +1092,14 @@ const DisplayAttendees = ({
             <Tooltip
               content={attendees.slice(1).map((attendee) => (
                 <p key={attendee.email}>
-                  <Attendee {...attendee} bookingUid={bookingUid} isBookingInPast={isBookingInPast} />
+                  <Attendee
+                    {...attendee}
+                    bookingUid={bookingUid}
+                    isBookingInPast={isBookingInPast}
+                    hideOrganizerEmail={hideOrganizerEmail}
+                    organizerEmail={organizerEmail}
+                    eventTypeHosts={eventTypeHosts}
+                  />
                 </p>
               ))}>
               {isBookingInPast ? (
@@ -1025,7 +1109,14 @@ const DisplayAttendees = ({
               )}
             </Tooltip>
           ) : (
-            <Attendee {...attendees[1]} bookingUid={bookingUid} isBookingInPast={isBookingInPast} />
+            <Attendee
+              {...attendees[1]}
+              bookingUid={bookingUid}
+              isBookingInPast={isBookingInPast}
+              hideOrganizerEmail={hideOrganizerEmail}
+              organizerEmail={organizerEmail}
+              eventTypeHosts={eventTypeHosts}
+            />
           )}
         </>
       )}
@@ -1033,12 +1124,21 @@ const DisplayAttendees = ({
   );
 };
 
-const AssignmentReasonTooltip = ({ assignmentReason }: { assignmentReason: AssignmentReason }) => {
+const AssignmentReasonTooltip = ({
+  assignmentReason,
+  onClick,
+}: {
+  assignmentReason: Pick<AssignmentReason, "reasonEnum" | "reasonString">;
+  onClick?: () => void;
+}) => {
   const { t } = useLocale();
   const badgeTitle = assignmentReasonBadgeTitleMap(assignmentReason.reasonEnum);
   return (
     <Tooltip content={<p>{assignmentReason.reasonString}</p>}>
-      <Badge className="ltr:mr-2 rtl:ml-2" variant="gray">
+      <Badge
+        className={classNames("ltr:mr-2 rtl:ml-2", onClick && "cursor-pointer hover:opacity-80")}
+        variant="gray"
+        onClick={onClick}>
         {t(badgeTitle)}
       </Badge>
     </Tooltip>

@@ -1,12 +1,13 @@
 import type { PrismaClient } from "@calcom/prisma";
 
+import logger from "@calcom/lib/logger";
 import type { TrpcSessionUser } from "../../../../types";
 import { getHandler } from "./get.handler";
 import type { TGetByEventSlugInputSchema } from "./getScheduleByEventTypeSlug.schema";
 
 type GetOptions = {
   ctx: {
-    user: NonNullable<TrpcSessionUser>;
+    user: Pick<NonNullable<TrpcSessionUser>, "id" | "timeZone" | "defaultScheduleId">;
     prisma: PrismaClient;
   };
   input: TGetByEventSlugInputSchema;
@@ -57,7 +58,7 @@ export const getScheduleByEventSlugHandler = async ({ ctx, input }: GetOptions) 
       },
     });
   } catch (e) {
-    console.log(e);
+    logger.error(e);
     return {
       id: -1,
       name: "No schedules found",

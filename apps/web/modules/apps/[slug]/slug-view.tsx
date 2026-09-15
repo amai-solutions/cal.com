@@ -56,7 +56,6 @@ function SingleAppPage(props: AppDataProps) {
       website={data.url}
       email={data.email}
       licenseRequired={data.licenseRequired}
-      teamsPlanRequired={data.teamsPlanRequired}
       descriptionItems={source.data?.items as string[] | undefined}
       isTemplate={data.isTemplate}
       dependencies={data.dependencies}
@@ -66,7 +65,8 @@ function SingleAppPage(props: AppDataProps) {
       //   privacy="https://zoom.us/privacy"
       body={
         <>
-          { }
+          {}
+          {/* biome-ignore lint/security/noDangerouslySetInnerHtml: Content is sanitized via markdownToSafeHTML */}
           <div dangerouslySetInnerHTML={{ __html: markdownToSafeHTML(source.content) }} />
         </>
       }

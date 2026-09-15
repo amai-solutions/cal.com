@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Booking Audit System tracks all actions and changes related to bookings in Cal.com. The architecture is built around two core tables (`AuditActor` and `BookingAudit`) that work together to maintain a complete, immutable audit trail.
+The Booking Audit System tracks all actions and changes related to bookings in Cal.diy. The architecture is built around two core tables (`AuditActor` and `BookingAudit`) that work together to maintain a complete, immutable audit trail.
 
 ## Database Architecture
 
@@ -36,7 +36,7 @@ The Booking Audit System tracks all actions and changes related to bookings in C
 
 ## Actor Types
 
-- **USER**: Registered Cal.com users
+- **USER**: Registered Cal.diy users
 - **GUEST**: Non-registered users (typically booking guests)
 - **ATTENDEE**: Guests who have an Attendee record associated with a booking
 - **SYSTEM**: Automated system actions
@@ -47,15 +47,16 @@ The booking audit system uses two complementary fields:
 
 ### Source: The Channel
 **`source`** identifies how the action was initiated:
-- **WEBAPP**: Cal.com web application
+- **WEBAPP**: Cal.diy web application
 - **API_V1**: API v1 endpoint
 - **API_V2**: API v2 endpoint
 - **WEBHOOK**: External webhook (e.g., Stripe)
+- **SYSTEM**: Background job (e.g., Tasker's task, trigger.dev job for automatic no-show detection)
 - **UNKNOWN**: Source cannot be determined
 
 ### Actor: The Entity
 **`actor`** identifies who or what performed the action:
-- **User Actor**: Registered Cal.com user
+- **User Actor**: Registered Cal.diy user
 - **Guest Actor**: Non-registered guest
 - **Attendee Actor**: Attendee associated with a booking
 - **System Actor**: Automated system action (generic or named for specific webhooks/services)
@@ -75,8 +76,7 @@ The system tracks various booking actions including:
 - **ATTENDEE_REMOVED**: Attendee removed
 - **REASSIGNMENT**: Booking reassigned to different host
 - **LOCATION_CHANGED**: Meeting location updated
-- **HOST_NO_SHOW_UPDATED**: Host no-show status changed
-- **ATTENDEE_NO_SHOW_UPDATED**: Attendee no-show status changed
+- **NO_SHOW_UPDATED**: Host or attendee no-show status changed
 - **SEAT_BOOKED**: Seat reserved in group booking
 - **SEAT_RESCHEDULED**: Seat rescheduled in group booking
 
@@ -204,7 +204,7 @@ The audit system works with third-party queue providers without exposing PII:
 - `operationId`: Required string for correlating related audit logs
 - `data`: Action-specific data
 - `timestamp`: Number (milliseconds since epoch)
-- `source`: Action source (API_V1, API_V2, WEBAPP, WEBHOOK, UNKNOWN)
+- `source`: Action source (API_V1, API_V2, WEBAPP, WEBHOOK, SYSTEM, UNKNOWN)
 
 **BookingAuditTaskConsumer** processes audit records:
 - Validates queue payload structure

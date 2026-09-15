@@ -1,22 +1,35 @@
-import { createModule } from "@evyweb/ioctopus";
-
+import { EventTypeRepository } from "@calcom/features/eventtypes/repositories/eventTypeRepository";
+import { UsersRepository } from "@calcom/features/users/users.repository";
 import { createPayloadBuilderFactory } from "@calcom/features/webhooks/lib/factory/versioned/registry";
 import { WebhookRepository } from "@calcom/features/webhooks/lib/repository/WebhookRepository";
 import { BookingWebhookService } from "@calcom/features/webhooks/lib/service/BookingWebhookService";
-import { FormWebhookService } from "@calcom/features/webhooks/lib/service/FormWebhookService";
 import { OOOWebhookService } from "@calcom/features/webhooks/lib/service/OOOWebhookService";
 import { RecordingWebhookService } from "@calcom/features/webhooks/lib/service/RecordingWebhookService";
 import { WebhookNotificationHandler } from "@calcom/features/webhooks/lib/service/WebhookNotificationHandler";
 import { WebhookNotifier } from "@calcom/features/webhooks/lib/service/WebhookNotifier";
 import { WebhookService } from "@calcom/features/webhooks/lib/service/WebhookService";
-
+import { createModule } from "@evyweb/ioctopus";
 import { SHARED_TOKENS } from "../../shared/shared.tokens";
+import { DI_TOKENS } from "../../tokens";
 import { WEBHOOK_TOKENS } from "../Webhooks.tokens";
 
-export const webhookModule = createModule();
+const webhookModule = createModule();
 
-// Bind repository
-webhookModule.bind(WEBHOOK_TOKENS.WEBHOOK_REPOSITORY).toClass(WebhookRepository);
+// Bind cross-table repositories (used by WebhookRepository)
+webhookModule
+  .bind(WEBHOOK_TOKENS.WEBHOOK_EVENT_TYPE_REPOSITORY)
+  .toClass(EventTypeRepository, [DI_TOKENS.PRISMA_CLIENT]);
+
+webhookModule.bind(WEBHOOK_TOKENS.WEBHOOK_USER_REPOSITORY).toClass(UsersRepository, []);
+
+// Bind webhook repository with dependencies (Repository Pattern compliance)
+webhookModule
+  .bind(WEBHOOK_TOKENS.WEBHOOK_REPOSITORY)
+  .toClass(WebhookRepository, [
+    DI_TOKENS.PRISMA_CLIENT,
+    WEBHOOK_TOKENS.WEBHOOK_EVENT_TYPE_REPOSITORY,
+    WEBHOOK_TOKENS.WEBHOOK_USER_REPOSITORY,
+  ]);
 
 // Bind services
 webhookModule
@@ -31,10 +44,6 @@ webhookModule
     SHARED_TOKENS.TASKER,
     SHARED_TOKENS.LOGGER,
   ]);
-
-webhookModule
-  .bind(WEBHOOK_TOKENS.FORM_WEBHOOK_SERVICE)
-  .toClass(FormWebhookService, [WEBHOOK_TOKENS.WEBHOOK_NOTIFIER, WEBHOOK_TOKENS.WEBHOOK_SERVICE]);
 
 webhookModule
   .bind(WEBHOOK_TOKENS.RECORDING_WEBHOOK_SERVICE)
@@ -65,3 +74,5 @@ webhookModule
 webhookModule
   .bind(WEBHOOK_TOKENS.WEBHOOK_NOTIFIER)
   .toClass(WebhookNotifier, [WEBHOOK_TOKENS.WEBHOOK_NOTIFICATION_HANDLER, SHARED_TOKENS.LOGGER]);
+
+export { webhookModule };

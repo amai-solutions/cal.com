@@ -1,9 +1,11 @@
 import { expect } from "@playwright/test";
-import { createHash, randomBytes } from "crypto";
+import { createHash, randomBytes } from "node:crypto";
 
+import { OAUTH_ERROR_REASONS } from "@calcom/features/oauth/services/OAuthService";
+import { generateSecret } from "@calcom/features/oauth/utils/generateSecret";
 import { WEBAPP_URL } from "@calcom/lib/constants";
 import { prisma } from "@calcom/prisma";
-import { generateSecret } from "@calcom/trpc/server/routers/viewer/oAuth/addClient.handler";
+import { getDefaultPassword } from "./lib/testUtils";
 
 import { test } from "./lib/fixtures";
 
@@ -122,92 +124,25 @@ test.describe("OAuth Provider", () => {
     expect(validTokenData.username.startsWith("test user")).toBe(true);
   });
 
-  test("should create valid access token & refresh token for team", async ({ page, users }) => {
-    const user = await users.create({ username: "test user", name: "test user" }, { hasTeam: true });
+  test("should show signed-in user name instead of account selector when show_account_selector is not set", async ({
+    page,
+    users,
+  }) => {
+    const user = await users.create({ username: "test user", name: "test user" });
     await user.apiLogin();
 
     await page.goto(
       `auth/oauth2/authorize?client_id=${client.clientId}&redirect_uri=${client.redirectUri}&response_type=code&scope=READ_PROFILE&state=1234`
     );
+    await expect(page).toHaveURL(/auth\/oauth2\/authorize/);
 
-    await page.locator("#account-select").click();
-    const teamOption = page
-      .locator('[id*="react-select-"][id*="-option-"]')
-      .filter({ hasText: /Team/i })
-      .first();
-    await teamOption.waitFor({ state: "visible" });
-    await teamOption.click();
+    await page.waitForSelector('[data-testid="allow-button"]');
 
-    await page.getByTestId("allow-button").click();
+    // Should show "Signed in as" with the user's name
+    await expect(page.getByTestId("signed-in-user")).toBeVisible();
 
-    await page.waitForFunction(() => {
-      return window.location.href.startsWith("https://example.com");
-    });
-
-    const url = new URL(page.url());
-
-    // authorization code that is returned to client with redirect uri
-    const code = url.searchParams.get("code");
-
-    // request token with authorization code
-    const tokenForm = new URLSearchParams();
-    tokenForm.append("code", code ?? "");
-    tokenForm.append("client_id", client.clientId);
-    tokenForm.append("client_secret", client.orginalSecret);
-    tokenForm.append("grant_type", "authorization_code");
-    tokenForm.append("redirect_uri", client.redirectUri);
-    const tokenResponse = await fetch(`${WEBAPP_URL}/api/auth/oauth/token`, {
-      body: tokenForm.toString(),
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-    });
-
-    const tokenData = await tokenResponse.json();
-
-    // test if token is valid
-    const meResponse = await fetch(`${WEBAPP_URL}/api/auth/oauth/me`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${tokenData.access_token}`,
-      },
-    });
-
-    const meData = await meResponse.json();
-
-    // Check if team access token is valid
-    expect(meData.username).toEqual(`user-id-${user.id}'s Team`);
-
-    // request new token with refresh token
-    const refreshTokenForm = new URLSearchParams();
-    refreshTokenForm.append("refresh_token", tokenData.refresh_token);
-    refreshTokenForm.append("client_id", client.clientId);
-    refreshTokenForm.append("client_secret", client.orginalSecret);
-    refreshTokenForm.append("grant_type", "refresh_token");
-    const refreshTokenResponse = await fetch(`${WEBAPP_URL}/api/auth/oauth/refreshToken`, {
-      body: refreshTokenForm.toString(),
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-    });
-
-    const refreshTokenData = await refreshTokenResponse.json();
-
-    expect(refreshTokenData.access_token).toBeDefined();
-
-    const validTokenResponse = await fetch(`${WEBAPP_URL}/api/auth/oauth/me`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${tokenData.access_token}`,
-      },
-    });
-
-    const validTokenData = await validTokenResponse.json();
-    expect(validTokenData.username).toEqual(`user-id-${user.id}'s Team`);
+    // Account selector should not be present
+    await expect(page.locator("#account-select")).not.toBeVisible();
   });
 
   test("redirect not logged-in users to login page and after forward to authorization page", async ({
@@ -221,12 +156,13 @@ test.describe("OAuth Provider", () => {
     );
 
     // check if user is redirected to login page
-    await expect(page.getByRole("heading", { name: "Welcome back" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Cal.diy" })).toBeVisible();
+    await expect(page.getByTestId("login-subtitle")).toBeVisible();
     await page.locator("#email").fill(user.email);
-    await page.locator("#password").fill(user.username || "");
+    await page.locator("#password").fill(getDefaultPassword(user.username!));
     await page.locator('[type="submit"]').click();
 
-    await page.waitForSelector("#account-select");
+    await page.waitForSelector('[data-testid="allow-button"]');
 
     await expect(page.getByText("test user")).toBeVisible();
   });
@@ -417,7 +353,7 @@ test.describe("OAuth Provider - PKCE (Public Clients)", () => {
 
     const url = new URL(page.url());
     expect(url.searchParams.get("error")).toBe("invalid_request");
-    expect(url.searchParams.get("error_description")).toBe("code_challenge required for public clients");
+    expect(url.searchParams.get("error_description")).toBe(OAUTH_ERROR_REASONS["pkce_required"]);
     expect(url.searchParams.get("state")).toBe("1234");
     // Should not contain authorization code
     expect(url.searchParams.get("code")).toBeNull();

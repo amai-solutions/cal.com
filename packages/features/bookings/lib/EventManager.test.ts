@@ -1,12 +1,34 @@
 import { prisma } from "@calcom/prisma/__mocks__/prisma";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { describe, expect, it, vi, beforeEach } from "vitest";
+vi.mock("@calcom/features/watchlist/lib/utils/normalization", () => ({
+  normalizeEmail: vi.fn(),
+  extractDomainFromEmail: vi.fn(),
+  normalizeDomain: vi.fn(),
+}));
+vi.mock("@calcom/features/watchlist/lib/service/GlobalBlockingService", () => ({
+  GlobalBlockingService: vi.fn(),
+}));
+vi.mock("@calcom/features/watchlist/lib/freeEmailDomainCheck/checkIfFreeEmailDomain", () => ({
+  checkIfFreeEmailDomain: vi.fn(),
+}));
+vi.mock("@calcom/features/watchlist/operations/check-if-users-are-blocked.controller", () => ({
+  checkIfUsersAreBlocked: vi.fn(),
+}));
+vi.mock("@calcom/features/watchlist/lib/telemetry", () => ({
+  sentrySpan: vi.fn(),
+}));
+vi.mock("@calcom/lib/i18n", () => ({
+  locales: ["en"],
+  localeOptions: [{ value: "en", label: "English" }],
+  defaultLocaleOption: { value: "en", label: "English" },
+}));
 
+import process from "node:process";
 import { CredentialRepository } from "@calcom/features/credentials/repositories/CredentialRepository";
 import { symmetricDecrypt } from "@calcom/lib/crypto";
 import type { DestinationCalendar } from "@calcom/prisma/client";
 import type { CredentialForCalendarService } from "@calcom/types/Credential";
-
 import EventManager from "./EventManager";
 
 vi.mock("@calcom/prisma", () => ({
@@ -21,6 +43,12 @@ vi.mock("@calcom/features/credentials/repositories/CredentialRepository", () => 
   CredentialRepository: {
     findCredentialForCalendarServiceById: vi.fn(),
   },
+}));
+
+vi.mock("@calcom/app-store/delegationCredential", () => ({
+  enrichHostsWithDelegationCredentials: vi.fn(),
+  getUsersCredentialsIncludeServiceAccountKey: vi.fn(),
+  getCredentialForSelectedCalendar: vi.fn(),
 }));
 
 const mockedSymmetricDecrypt = vi.mocked(symmetricDecrypt);
@@ -61,7 +89,6 @@ function buildDestinationCalendar(data: {
     createdAt: new Date(),
     updatedAt: new Date(),
     delegationCredentialId: null,
-    domainWideDelegationCredentialId: null,
   };
 }
 

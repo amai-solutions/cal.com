@@ -1,18 +1,16 @@
-import prismaMock from "../../../tests/libs/__mocks__/prismaMock";
+import prismaMock from "@calcom/testing/lib/__mocks__/prismaMock";
 
-import { describe, expect, it, beforeEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { usernameCheckForSignup } from "./username";
+import { generateUsernameSuggestion, usernameCheckForSignup } from "./username";
 
 describe("usernameCheckForSignup ", async () => {
   beforeEach(() => {
-    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-    //@ts-ignore
+    // @ts-expect-error
     prismaMock.user.findUnique.mockImplementation(() => {
       return null;
     });
-    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-    //@ts-ignore
+    // @ts-expect-error
     prismaMock.user.findMany.mockImplementation(() => {
       return [];
     });
@@ -59,9 +57,35 @@ describe("usernameCheckForSignup ", async () => {
   });
 });
 
+describe("generateUsernameSuggestion", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("appends a zero-padded suffix when the username is free on the first attempt", async () => {
+    const suggestion = await generateUsernameSuggestion([], "john");
+    expect(suggestion).toBe("john001");
+  });
+
+  it("zero-pads a two-digit suffix to a consistent width", async () => {
+    // Force the first candidate (john001) to collide so a random suffix is generated,
+    // and pin Math.random so the generated suffix is the two-digit number 42.
+    // username length >= 2 -> limit 999 -> rand = ceil(1 + random * 998); 40.5/998 -> ceil(41.5) = 42.
+    vi.spyOn(Math, "random").mockReturnValue(40.5 / 998);
+    const suggestion = await generateUsernameSuggestion(["john001"], "john");
+    expect(suggestion).toBe("john042");
+  });
+
+  it("zero-pads a three-digit suffix to a consistent width", async () => {
+    // 122.5/998 -> ceil(1 + 122.5) = ceil(123.5) = 124.
+    vi.spyOn(Math, "random").mockReturnValue(122.5 / 998);
+    const suggestion = await generateUsernameSuggestion(["john001"], "john");
+    expect(suggestion).toBe("john124");
+  });
+});
+
 function mockUserInDB({ id, email, username }: { id: number; email: string; username: string }) {
-  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-  //@ts-ignore
+  // @ts-expect-error
   prismaMock.user.findUnique.mockImplementation((arg) => {
     if (arg.where.email === email) {
       return {
@@ -75,12 +99,10 @@ function mockUserInDB({ id, email, username }: { id: number; email: string; user
 }
 
 function mockMembership({ userId }: { userId: number }) {
-  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-  //@ts-ignore
+  // @ts-expect-error
   prismaMock.membership.findFirst.mockImplementation((arg) => {
     const isOrganizationWhereClause =
-      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-      //@ts-ignore
+      // @ts-expect-error
       arg?.where?.team?.metadata?.path[0] === "isOrganization" && arg?.where?.team?.metadata?.equals === true;
     if (arg?.where?.userId === userId && isOrganizationWhereClause) {
       return {

@@ -1,6 +1,5 @@
 import type { UnitTypeLongPlural } from "dayjs";
 import type { TFunction } from "i18next";
-import z, { ZodNullable, ZodObject, ZodOptional } from "zod";
 import type {
   AnyZodObject,
   objectInputType,
@@ -10,15 +9,14 @@ import type {
   ZodRawShape,
   ZodTypeAny,
 } from "zod";
-
-import { EventTypeCustomInputType } from "@calcom/prisma/enums";
-
+import z, { ZodNullable, ZodObject, ZodOptional } from "zod";
 import type { Prisma } from "./client";
+import { EventTypeCustomInputType } from "./enums";
 
 /** @see https://github.com/colinhacks/zod/issues/3155#issuecomment-2060045794 */
 export const emailRegex =
   /* eslint-disable-next-line no-useless-escape */
-  /^(?!\.)(?!.*\.\.)([A-Z0-9_+-\.']*)[A-Z0-9_+'-]@([A-Z0-9][A-Z0-9\-]*\.)+[A-Z]{2,}$/i;
+  /^(?!\.)(?!.*\.\.)([A-Z0-9_+-.']*)[A-Z0-9_+'-]@([A-Z0-9][A-Z0-9-]*\.)+[A-Z]{2,}$/i;
 
 /**
  * RFC 5321 Section 4.5.3.1.3 specifies:
@@ -32,35 +30,6 @@ const emailRegexSchema = z
   .string()
   .max(MAX_EMAIL_LENGTH, { message: "Email address is too long" })
   .regex(emailRegex);
-
-const slugify = (str: string, forDisplayingInput?: boolean) => {
-  if (!str) {
-    return "";
-  }
-
-  const s = str
-    .toLowerCase() // Convert to lowercase
-    .trim() // Remove whitespace from both sides
-    .normalize("NFD") // Normalize to decomposed form for handling accents
-    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-    // @ts-ignore
-    .replace(/\p{Diacritic}/gu, "") // Remove any diacritics (accents) from characters
-    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-    // @ts-ignore
-    .replace(/[^.\p{L}\p{N}\p{Zs}\p{Emoji}]+/gu, "-") // Replace any non-alphanumeric characters (including Unicode and except "." period) with a dash
-    .replace(/[\s_#]+/g, "-") // Replace whitespace, # and underscores with a single dash
-    .replace(/^-+/, "") // Remove dashes from start
-    .replace(/\.{2,}/g, ".") // Replace consecutive periods with a single period
-    .replace(/^\.+/, "") // Remove periods from the start
-    .replace(
-      /([\u2700-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDD10-\uDDFF])/g,
-      ""
-    ) // Removes emojis
-    .replace(/\s+/g, " ")
-    .replace(/-+/g, "-"); // Replace consecutive dashes with a single dash
-
-  return forDisplayingInput ? s : s.replace(/-+$/, "").replace(/\.*$/, ""); // Remove dashes and period from end
-};
 
 const getValidRhfFieldName = (fieldName: string) => {
   // Remember that any transformation that you do here would run on System Field names as well. So, be careful and avoiding doing anything here that would modify the SystemField names.
@@ -107,76 +76,6 @@ export const intervalLimitsType: z.Schema<IntervalLimit | null> = z
     PER_YEAR: z.number().optional(),
   })
   .nullable();
-
-const raqbChildSchema = z.object({
-  type: z.string().optional(),
-  properties: z
-    .object({
-      field: z.any().optional(),
-      operator: z.any().optional(),
-      value: z.any().optional(),
-      valueSrc: z.any().optional(),
-      valueError: z.array(z.union([z.string(), z.null()])).optional(),
-      valueType: z.any().optional(),
-    })
-    .optional(),
-});
-
-const raqbChildren1Schema = z.record(raqbChildSchema).superRefine((children1, ctx) => {
-  if (!children1) return;
-  const isObject = (value: unknown): value is Record<string, unknown> =>
-    typeof value === "object" && value !== null;
-  Object.entries(children1).forEach(([, _rule]) => {
-    const rule = _rule as unknown;
-    if (!isObject(rule) || rule.type !== "rule") return;
-    if (!isObject(rule.properties)) return;
-
-    const value = rule.properties.value || [];
-    const valueSrc = rule.properties.valueSrc;
-    if (!(value instanceof Array) || !(valueSrc instanceof Array)) {
-      return;
-    }
-
-    if (!valueSrc.length) {
-      // If valueSrc is empty, value could be empty for operators like is_empty, is_not_empty
-      return;
-    }
-
-    // MultiSelect array can be 2D array
-    const flattenedValues = value.flat();
-
-    const validValues = flattenedValues.filter((value: unknown) => {
-      // Might want to restrict it to filter out null and empty string as well. But for now we know that Prisma errors only for undefined values when saving it in JSON field
-      // Also, it is possible that RAQB has some requirements to support null or empty string values.
-      if (value === undefined) return false;
-      return true;
-    });
-
-    if (!validValues.length) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Looks like you are trying to create a rule with no value",
-      });
-    }
-  });
-});
-
-const raqbQueryValueSchema = z.union([
-  z.object({
-    id: z.string().optional(),
-    type: z.literal("group"),
-    children1: raqbChildren1Schema.optional(),
-    properties: z.any(),
-  }),
-  z.object({
-    id: z.string().optional(),
-    type: z.literal("switch_group"),
-    children1: raqbChildren1Schema.optional(),
-    properties: z.any(),
-  }),
-]);
-
-const zodAttributesQueryValue = raqbQueryValueSchema;
 
 // Let's not import 118kb just to get an enum
 export enum Frequency {
@@ -248,6 +147,7 @@ const _eventTypeMetaDataSchemaWithoutApps = z.object({
   smartContractAddress: z.string().optional(),
   blockchainId: z.number().optional(),
   multipleDuration: z.number().array().optional(),
+  hideDurationSelectorInBookingPage: z.boolean().optional(),
   giphyThankYouPage: z.string().optional(),
   additionalNotesRequired: z.boolean().optional(),
   disableSuccessPage: z.boolean().optional(),
@@ -327,20 +227,8 @@ export const bookingResponses = z
 
 export type BookingResponses = z.infer<typeof bookingResponses>;
 
-export const eventTypeLocations = z.array(
-  z.object({
-    // TODO: Couldn't find a way to make it a union of types from App Store locations
-    // Creating a dynamic union by iterating over the object doesn't seem to make TS happy
-    type: z.string(),
-    address: z.string().optional(),
-    link: z.string().url().optional(),
-    displayLocationPublicly: z.boolean().optional(),
-    hostPhoneNumber: z.string().optional(),
-    credentialId: z.number().optional(),
-    teamName: z.string().optional(),
-    customLabel: z.string().optional(),
-  })
-);
+// Re-exported from @calcom/lib/zod/eventType for backwards compatibility
+export { type EventTypeLocation, eventTypeLocations } from "@calcom/lib/zod/eventType";
 
 // Matching RRule.Options: rrule/dist/esm/src/types.d.ts
 export const recurringEventType = z
@@ -377,13 +265,8 @@ export const eventTypeColor = z
 
 export type IntervalLimitsType = IntervalLimit | null;
 
-export const eventTypeSlug = z
-  .string()
-  .trim()
-  .transform((val) => slugify(val))
-  .refine((val) => val.length >= 1, {
-    message: "Please enter at least one character",
-  });
+// Re-exported from @calcom/lib/zod/eventType for backwards compatibility
+export { eventTypeSlug } from "@calcom/lib/zod/eventType";
 
 export const stringToDate = z.string().transform((a) => new Date(a));
 
@@ -403,9 +286,14 @@ export const stringOrNumber = z.union([
 
 export const requiredCustomInputSchema = z.union([
   // string must be given & nonempty
-  z.string().trim().min(1),
+  z
+    .string()
+    .trim()
+    .min(1),
   // boolean must be true if set.
-  z.boolean().refine((v) => v === true),
+  z
+    .boolean()
+    .refine((v) => v === true),
 ]);
 
 const PlatformClientParamsSchema = z.object({
@@ -426,6 +314,8 @@ export const bookingConfirmPatchBodySchema = z.object({
   reason: z.string().optional(),
   emailsEnabled: z.boolean().default(true),
   platformClientParams: PlatformClientParamsSchema.optional(),
+  actionSource: z.string().optional(),
+  actor: z.unknown().optional(),
 });
 
 export const bookingCancelSchema = z.object({
@@ -437,6 +327,7 @@ export const bookingCancelSchema = z.object({
   cancelSubsequentBookings: z.boolean().optional(),
   cancellationReason: z.string().optional(),
   skipCancellationReasonValidation: z.boolean().optional(),
+  skipCalendarSyncTaskCancellation: z.boolean().optional(),
   seatReferenceUid: z.string().optional(),
   cancelledBy: z.string().email({ message: "Invalid email" }).optional(),
   internalNote: z
@@ -569,6 +460,7 @@ export const teamMetadataStrictSchema = baseTeamMetadataSchema
 export const bookingMetadataSchema = z
   .object({
     videoCallUrl: z.string().optional(),
+    platformClientId: z.string().optional(),
   })
   .and(z.record(z.string()))
   .nullable()
@@ -636,17 +528,6 @@ export const successRedirectUrl = z
   ])
   .optional();
 
-export const RoutingFormSettings = z
-  .object({
-    // Applicable only for User Forms
-    emailOwnerOnSubmission: z.boolean(),
-
-    // Applicable only for Team Forms
-    sendUpdatesTo: z.array(z.number()).optional(),
-    sendToAll: z.boolean().optional(),
-  })
-  .nullable();
-
 export const DeploymentTheme = z
   .object({
     brand: z.string().default("#292929"),
@@ -688,7 +569,7 @@ export function denullishShape<
   UnknownKeys extends UnknownKeysParam = "strip",
   Catchall extends ZodTypeAny = ZodTypeAny,
   Output = objectOutputType<T, Catchall>,
-  Input = objectInputType<T, Catchall>
+  Input = objectInputType<T, Catchall>,
 >(
   obj: ZodObject<T, UnknownKeys, Catchall, Output, Input>
 ): ZodObject<ZodDenullishShape<T>, UnknownKeys, Catchall> {
@@ -720,13 +601,14 @@ export const entries = <O extends Record<string, unknown>>(
 /**
  * Returns a type with all readonly notations removed (traverses recursively on an object)
  */
-type DeepWriteable<T> = T extends Readonly<{
-  -readonly [K in keyof T]: T[K];
-}>
-  ? {
-      -readonly [K in keyof T]: DeepWriteable<T[K]>;
-    }
-  : T; /* Make it work with readonly types (this is not strictly necessary) */
+type DeepWriteable<T> =
+  T extends Readonly<{
+    -readonly [K in keyof T]: T[K];
+  }>
+    ? {
+        -readonly [K in keyof T]: DeepWriteable<T[K]>;
+      }
+    : T; /* Make it work with readonly types (this is not strictly necessary) */
 
 type FromEntries<T> = T extends [infer Keys, unknown][]
   ? { [K in Keys & PropertyKey]: Extract<T[number], [K, unknown]>[1] }
@@ -739,7 +621,7 @@ type FromEntries<T> = T extends [infer Keys, unknown][]
  * @see https://github.com/3x071c/lsg-remix/blob/e2a9592ba3ec5103556f2cf307c32f08aeaee32d/app/lib/util/fromEntries.ts
  */
 export const fromEntries = <
-  E extends [PropertyKey, unknown][] | ReadonlyArray<readonly [PropertyKey, unknown]>
+  E extends [PropertyKey, unknown][] | ReadonlyArray<readonly [PropertyKey, unknown]>,
 >(
   entries: E
 ): FromEntries<DeepWriteable<E>> => {
@@ -793,7 +675,6 @@ export const allManagedEventTypeProps: { [k in keyof Omit<Prisma.EventTypeSelect
   isInstantEvent: true,
   instantMeetingParameters: true,
   instantMeetingExpiryTimeOffsetInSeconds: true,
-  aiPhoneCallConfig: true,
   currency: true,
   periodDays: true,
   position: true,
@@ -810,6 +691,7 @@ export const allManagedEventTypeProps: { [k in keyof Omit<Prisma.EventTypeSelect
   disableGuests: true,
   disableCancelling: true,
   disableRescheduling: true,
+  requiresCancellationReason: true,
   allowReschedulingCancelledBookings: true,
   requiresConfirmation: true,
   canSendCalVideoTranscriptionEmails: true,
@@ -840,7 +722,6 @@ export const allManagedEventTypeProps: { [k in keyof Omit<Prisma.EventTypeSelect
   showOptimizedSlots: true,
   slotInterval: true,
   scheduleId: true,
-  workflows: true,
   bookingFields: true,
   durationLimits: true,
   maxActiveBookingsPerBooker: true,
@@ -892,6 +773,7 @@ export const allManagedEventTypePropsForZod = {
   disableGuests: true,
   disableCancelling: true,
   disableRescheduling: true,
+  requiresCancellationReason: true,
   allowReschedulingCancelledBookings: true,
   requiresConfirmation: true,
   canSendCalVideoTranscriptionEmails: true,
@@ -947,7 +829,9 @@ export const emailSchema = emailRegexSchema;
 // The PR at https://github.com/colinhacks/zod/pull/2157 addresses this issue and improves email validation
 // I introduced this refinement(to be used with z.email()) as a short term solution until we upgrade to a zod
 // version that will include updates in the above PR.
-export const emailSchemaRefinement = (value: string) => {
+export const emailSchemaRefinement = (value: string | null | undefined) => {
+  // If there's no value, it's NOT a valid email format, so return false.
+  if (!value) return false;
   return emailSchema.safeParse(value).success;
 };
 
@@ -1001,7 +885,8 @@ export const serviceAccountKeySchema = z
 
 export type TServiceAccountKeySchema = z.infer<typeof serviceAccountKeySchema>;
 
-export const rrSegmentQueryValueSchema = zodAttributesQueryValue.nullish();
+// rrSegmentQueryValue is stored as JSON in EventType - just parse as nullable JSON object
+export const rrSegmentQueryValueSchema = z.record(z.string(), z.unknown()).nullish();
 
 // Routing Form Fields
 export const fieldTypeEnum = z.enum([
@@ -1045,7 +930,8 @@ export const excludeOrRequireEmailSchema = z.string().superRefine((val, ctx) => 
   // Accept forms: domain-only, `@domain`, or `local@domain`
   // - Domain labels: alnum, hyphens allowed internally, no leading/trailing hyphen
   // - Require at least one dot and end with an alpha TLD of length ≥2
-  const EMAIL_OR_DOMAIN_PATTERN = /^(?:[a-z0-9._+'-]+@|@)?(?:[a-z]{2,}|(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,})$/i;
+  const EMAIL_OR_DOMAIN_PATTERN =
+    /^(?:[a-z0-9._+'-]+@|@)?(?:[a-z]{2,}|(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,})$/i;
 
   const isValid = allDomains.every((entry) => EMAIL_OR_DOMAIN_PATTERN.test(entry));
 

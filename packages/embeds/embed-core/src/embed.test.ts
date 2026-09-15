@@ -325,6 +325,48 @@ describe("Cal", () => {
     });
   });
 
+  describe("__iframeReady handler", () => {
+    function fireIframeReady(ns: string) {
+      const errors: unknown[] = [];
+      const onError = (e: ErrorEvent) => {
+        errors.push(e.error);
+        e.preventDefault();
+      };
+      window.addEventListener("error", onError);
+      window.dispatchEvent(
+        new CustomEvent(`CAL:${ns}:__iframeReady`, {
+          detail: { type: "__iframeReady", namespace: ns, data: { isPrerendering: false } },
+        })
+      );
+      window.removeEventListener("error", onError);
+      return errors;
+    }
+
+    it("ignores __iframeReady on an instance that has no iframe", () => {
+      const instanceWithIframe = new CalClass("dup-ns", []);
+      const host = document.createElement("div");
+      document.body.appendChild(host);
+      instanceWithIframe.api.inline({ calLink: "user/30min", elementOrSelector: host });
+      const instanceWithoutIframe = new CalClass("dup-ns", []);
+
+      expect(fireIframeReady("dup-ns")).toEqual([]);
+      expect(instanceWithIframe.iframeReady).toBe(true);
+      expect(instanceWithoutIframe.iframeReady).toBeFalsy();
+    });
+
+    it("marks the iframe ready and visible when the instance owns an iframe", () => {
+      const cal = new CalClass("ready-ns", []);
+      const host = document.createElement("div");
+      document.body.appendChild(host);
+      cal.api.inline({ calLink: "user/30min", elementOrSelector: host });
+      cal.iframe!.style.visibility = "hidden";
+
+      expect(fireIframeReady("ready-ns")).toEqual([]);
+      expect(cal.iframeReady).toBe(true);
+      expect(cal.iframe!.style.visibility).toBe("");
+    });
+  });
+
   /**
    * We don't mock the createIframe method as it could update the 'this' objects which could affect the test, so we avoid mocking it
    */
@@ -704,6 +746,117 @@ describe("Cal", () => {
     });
   });
 
+  describe("__reloadInitiated behavior - ensures correct bookerViewed vs bookerReloaded event firing", () => {
+    /**
+     * These tests verify that __reloadInitiated is sent correctly via doInIframe,
+     * which determines whether bookerViewed or bookerReloaded fires in the iframe.
+     * 
+     * - If __reloadInitiated is sent → iframe sets reloadInitiated=true → bookerReloaded fires
+     * - If __reloadInitiated is NOT sent → iframe has reloadInitiated=false → bookerViewed fires
+     */
+    beforeEach(() => {
+      calInstance = new CalClass("test-namespace", []);
+      window.Cal.config = { forwardQueryParams: false };
+      vi.spyOn(calInstance, "doInIframe");
+    });
+
+    it("should send __reloadInitiated when fullReload action is taken (bookerReloaded should fire)", async () => {
+      const baseModalArgs = {
+        calLink: "john-doe/meeting",
+        config: { theme: "light", layout: "modern" },
+      };
+
+      // 1. First modal open - creates new modal (no __reloadInitiated)
+      await calInstance.api.modal({ ...baseModalArgs, __prerender: true });
+      expect(calInstance.doInIframe).not.toHaveBeenCalledWith(
+        expect.objectContaining({ method: "__reloadInitiated" })
+      );
+
+      vi.mocked(calInstance.doInIframe).mockClear();
+
+      // 2. Open modal with DIFFERENT calLink - triggers fullReload
+      // This should send __reloadInitiated because it's a reload scenario
+      await calInstance.api.modal({
+        ...baseModalArgs,
+        calLink: "jane-doe/meeting",
+      });
+
+      expect(calInstance.doInIframe).toHaveBeenCalledWith({
+        method: "__reloadInitiated",
+        arg: {},
+      });
+    });
+
+    it("should NOT send __reloadInitiated when creating a new modal (bookerViewed should fire)", async () => {
+      const baseModalArgs = {
+        calLink: "john-doe/meeting",
+        config: { theme: "light", layout: "modern" },
+      };
+
+      // Create a new modal - should NOT send __reloadInitiated
+      await calInstance.api.modal(baseModalArgs);
+
+      expect(calInstance.doInIframe).not.toHaveBeenCalledWith(
+        expect.objectContaining({ method: "__reloadInitiated" })
+      );
+    });
+
+    it("should NOT send __reloadInitiated when connect action is taken (bookerViewed should fire)", async () => {
+      const baseModalArgs = {
+        calLink: "john-doe/meeting",
+        config: { theme: "light", layout: "modern" },
+      };
+
+      // 1. Prerender the modal
+      await calInstance.api.modal({ ...baseModalArgs, __prerender: true });
+      vi.mocked(calInstance.doInIframe).mockClear();
+
+      // 2. Open modal with same calLink but different config - triggers connect (not fullReload)
+      await calInstance.api.modal({
+        ...baseModalArgs,
+        config: { ...baseModalArgs.config, name: "John Doe" },
+      });
+
+      // Should call connect, NOT __reloadInitiated
+      expect(calInstance.doInIframe).toHaveBeenCalledWith(
+        expect.objectContaining({ method: "connect" })
+      );
+      expect(calInstance.doInIframe).not.toHaveBeenCalledWith(
+        expect.objectContaining({ method: "__reloadInitiated" })
+      );
+    });
+
+    it("should clear stale __reloadInitiated from queue when loadInIframe is called again", () => {
+      // This tests the queue clearing behavior that prevents stale __reloadInitiated
+      // from causing bookerReloaded to fire incorrectly
+      
+      // 1. Create iframe
+      const iframe = calInstance.createIframe({
+        calLink: "john-doe/meeting",
+        config: {},
+        calOrigin: null,
+      });
+
+      // 2. Simulate __reloadInitiated being queued (happens during fullReload)
+      calInstance.doInIframe({ method: "__reloadInitiated", arg: {} });
+      expect(calInstance.iframeDoQueue).toHaveLength(1);
+      expect(calInstance.iframeDoQueue[0].method).toBe("__reloadInitiated");
+
+      // 3. loadInIframe is called again (e.g., another fullReload before iframe ready)
+      // This should clear the queue, removing the stale __reloadInitiated
+      calInstance.loadInIframe({
+        calLink: "jane-doe/meeting",
+        config: {},
+        calOrigin: null,
+        iframe,
+      });
+
+      // 4. Queue should be cleared - stale __reloadInitiated removed
+      // This ensures the new iframe won't receive the old __reloadInitiated
+      expect(calInstance.iframeDoQueue).toHaveLength(0);
+    });
+  });
+
   describe("getNextActionForModal", () => {
     const baseArgs = {
       pathWithQueryToLoad: "john-doe/meeting",
@@ -735,6 +888,9 @@ describe("Cal", () => {
       };
       // Reset document.querySelector mock before each test
       vi.restoreAllMocks();
+      // Mock document.querySelector to return null by default (no existing modal)
+      // This prevents isInFailedState from being true
+      vi.spyOn(document, "querySelector").mockReturnValue(null);
     });
 
     it("should return fullReload when cal link is different", () => {

@@ -1,9 +1,7 @@
 import type { TGetTranscriptAccessLink } from "@calcom/app-store/dailyvideo/zod";
-import type { FORM_SUBMITTED_WEBHOOK_RESPONSES } from "@calcom/app-store/routing-forms/lib/formSubmissionUtils";
 import type { TimeUnit, WebhookTriggerEvents } from "@calcom/prisma/enums";
-
+import type { CalendarEvent, ConferenceData, Person } from "@calcom/types/Calendar";
 import type { WebhookVersion } from "../interface/IWebhookRepository";
-import type { CalendarEvent, Person } from "@calcom/types/Calendar";
 
 export interface BaseEventDTO {
   triggerEvent: WebhookTriggerEvents;
@@ -50,9 +48,11 @@ export interface BookingCancelledDTO extends BaseEventDTO {
     eventTypeId: number | null;
     userId: number | null;
     smsReminderNumber?: string | null;
+    iCalSequence?: number | null;
   };
   cancelledBy?: string;
   cancellationReason?: string;
+  requestReschedule?: boolean;
 }
 
 export interface BookingRejectedDTO extends BaseEventDTO {
@@ -81,6 +81,7 @@ export interface BookingRequestedDTO extends BaseEventDTO {
     eventTypeId: number | null;
     userId: number | null;
   };
+  metadata?: Record<string, unknown>;
 }
 
 export interface BookingRescheduledDTO extends BaseEventDTO {
@@ -180,7 +181,7 @@ export interface FormSubmittedDTO extends BaseEventDTO {
   };
   response: {
     id: number;
-    data: FORM_SUBMITTED_WEBHOOK_RESPONSES;
+    data: Record<string, { value: string | string[]; label: string }>;
   };
 }
 
@@ -210,7 +211,7 @@ export interface FormSubmittedNoEventDTO extends BaseEventDTO {
   };
   response: {
     id: number;
-    data: FORM_SUBMITTED_WEBHOOK_RESPONSES;
+    data: Record<string, { value: string | string[]; label: string }>;
   };
 }
 
@@ -300,17 +301,6 @@ export interface MeetingEndedDTO extends BaseEventDTO {
   };
 }
 
-export interface InstantMeetingDTO extends BaseEventDTO {
-  triggerEvent: typeof WebhookTriggerEvents.INSTANT_MEETING;
-  title: string;
-  body: string;
-  icon?: string;
-  url?: string;
-  actions?: { action: string; title: string; type: string; image: string | null }[];
-  requireInteraction?: boolean;
-  type: string;
-}
-
 export interface AfterHostsNoShowDTO extends BaseEventDTO {
   triggerEvent: typeof WebhookTriggerEvents.AFTER_HOSTS_CAL_VIDEO_NO_SHOW;
   bookingId: number;
@@ -333,12 +323,6 @@ export interface AfterGuestsNoShowDTO extends BaseEventDTO {
   };
 }
 
-export interface DelegationCredentialErrorDTO
-  extends BaseEventDTO,
-    Pick<DelegationCredentialErrorPayloadType, "error" | "credential" | "user"> {
-  triggerEvent: typeof WebhookTriggerEvents.DELEGATION_CREDENTIAL_ERROR;
-}
-
 export type WebhookEventDTO =
   | BookingCreatedDTO
   | BookingCancelledDTO
@@ -355,10 +339,8 @@ export type WebhookEventDTO =
   | TranscriptionGeneratedDTO
   | MeetingStartedDTO
   | MeetingEndedDTO
-  | InstantMeetingDTO
   | AfterHostsNoShowDTO
-  | AfterGuestsNoShowDTO
-  | DelegationCredentialErrorDTO;
+  | AfterGuestsNoShowDTO;
 
 // Service layer interfaces
 export interface WebhookTriggerArgs {
@@ -548,24 +530,6 @@ export type OOOEntryPayloadType = {
   };
 };
 
-export type DelegationCredentialErrorPayloadType = {
-  error: {
-    type: string;
-    message: string;
-  };
-  credential: {
-    id: number;
-    type: string;
-    appId: string;
-    delegationCredentialId?: string;
-  };
-  user: {
-    id: number;
-    email: string;
-    organizationId?: number;
-  };
-};
-
 export type EventPayloadType = CalendarEvent &
   TranscriptionGeneratedPayload &
   EventTypeInfo & {
@@ -582,6 +546,7 @@ export type EventPayloadType = CalendarEvent &
     rescheduledBy?: string;
     cancelledBy?: string;
     paymentData?: Record<string, unknown>;
+    requestReschedule?: boolean;
   };
 
 // dto/types.ts

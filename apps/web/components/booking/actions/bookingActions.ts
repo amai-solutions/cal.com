@@ -17,7 +17,6 @@ export interface BookingActionContext {
   isRecurring: boolean;
   isTabRecurring: boolean;
   isTabUnconfirmed: boolean;
-  isBookingFromRoutingForm: boolean;
   isDisabledCancelling: boolean;
   isDisabledRescheduling: boolean;
   isCalVideoLocation: boolean;
@@ -100,7 +99,6 @@ export function getEditEventActions(context: BookingActionContext): ActionType[]
     booking,
     isBookingInPast,
     isDisabledRescheduling,
-    isBookingFromRoutingForm,
     getSeatReferenceUid,
     isAttendee,
     t,
@@ -143,19 +141,11 @@ export function getEditEventActions(context: BookingActionContext): ActionType[]
           isDisabledRescheduling,
         }) || booking.seatsReferences.length > 0,
     },
-    isBookingFromRoutingForm
-      ? {
-          id: "reroute",
-          label: t("reroute"),
-          icon: "waypoints",
-          disabled: false,
-        }
-      : null,
     {
       id: "change_location",
       label: t("edit_location"),
       icon: "map-pin",
-      disabled: false,
+      disabled: isActionDisabled("change_location", context),
     },
     booking.eventType?.disableGuests
       ? null
@@ -163,14 +153,14 @@ export function getEditEventActions(context: BookingActionContext): ActionType[]
           id: "add_members",
           label: t("additional_guests"),
           icon: "user-plus",
-          disabled: false,
+          disabled: isActionDisabled("add_members", context),
         },
     isReassignable
       ? {
           id: "reassign",
           label: t("reassign"),
           icon: "users",
-          disabled: false,
+          disabled: isActionDisabled("reassign", context),
         }
       : null,
   ];
@@ -237,7 +227,15 @@ export function shouldShowIndividualReportButton(context: BookingActionContext):
 }
 
 export function isActionDisabled(actionId: string, context: BookingActionContext): boolean {
-  const { booking, isBookingInPast, isDisabledRescheduling, isDisabledCancelling, isAttendee } = context;
+  const {
+    booking,
+    isBookingInPast,
+    isDisabledRescheduling,
+    isDisabledCancelling,
+    isAttendee,
+    isCancelled,
+    isRejected,
+  } = context;
 
   switch (actionId) {
     case "reschedule":
@@ -256,18 +254,24 @@ export function isActionDisabled(actionId: string, context: BookingActionContext
           booking.eventType.minimumRescheduleNotice ?? null
         );
       return (
+        isCancelled ||
+        isRejected ||
         (isBookingInPast && !booking.eventType.allowReschedulingPastBookings) ||
         isDisabledRescheduling ||
         isWithinMinimumNotice
       );
     case "cancel":
-      return isDisabledCancelling || isBookingInPast;
+      return isDisabledCancelling || isBookingInPast || isCancelled || isRejected;
     case "view_recordings":
       return !(isBookingInPast && booking.status === BookingStatus.ACCEPTED && context.isCalVideoLocation);
     case "meeting_session_details":
       return !(isBookingInPast && booking.status === BookingStatus.ACCEPTED && context.isCalVideoLocation);
     case "charge_card":
       return context.cardCharged;
+    case "reassign":
+    case "change_location":
+    case "add_members":
+      return isBookingInPast || isCancelled || isRejected;
     default:
       return false;
   }
